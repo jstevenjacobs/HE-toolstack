@@ -3,6 +3,9 @@
 Supersedes PD-toolstack STACK-DESIGN v3.8.1. PD-toolstack is frozen as read-only evidence.
 This document records what changes, why, and which first-attempt evidence (E1-E2b, D-ledger,
 session record) each change traces to.
+**Status: direction-setting draft.** Phase 1 discovery & validation (`PHASE1-ARCHITECTURE-DISCOVERY.md`)
+supersedes parts of §1–§3 where marked; the engineering-grade spec is
+`HE-TOOLSTACK-TECHNICAL-DESIGN.md` (Phase 2).
 
 ---
 
@@ -11,21 +14,35 @@ session record) each change traces to.
 These are first-attempt assets; the rewrite reuses them as requirements and fixtures, not as
 incidental context:
 
-1. **Physics gate as a pure CPU library** (`physics-gate/`): 5 independent checks (1st-law
-   closure, exergy balance, Clausius-inequality, Carnot bound, 2nd-law efficiency) with
-   tiered tolerances, verdict JSON on stdout, exit codes as API. E1 and E2 proved it catches
-   real physics errors the solver's own residual could not (fixed-(T,P) BC, ~73.8 bar entropy
-   inconsistency). Keep: FastAPI+uvicorn, pinned REFPROP, torch excluded.
-2. **GPU broker queue discipline** (`gpu-broker/`): FIFO, job JSON submitted atomically,
-   leases never preempted mid-job, per-job logs preserved. This worked throughout, including
-   across three context-compaction handoffs in Stage E.
+1. **Physics-gate methodology**: 5 independent checks (1st-law closure, exergy balance,
+   Clausius-inequality, Carnot bound, 2nd-law efficiency) as design-time requirements, plus the
+   proven **gate-script pattern** (`properties/d2/gate.py` in `ta-validation`: fresh frozen probe
+   set, named dataset+digest inputs, p99 thresholds, corruption negative test exits 1). E1 and E2
+   proved gates catch real physics errors the solver's own residual could not (fixed-(T,P) BC,
+   ~73.8 bar entropy inconsistency). Note: no physics-gate *service* code exists — v1 shipped the
+   methodology + scripts, not a running service (see correction below).
+2. **Queue-serialization discipline (per user ruling v3.2)**: GPU tasks serialized by the job
+   queue itself (resource class, max-concurrency 1) + entrypoint admission (queue token +
+   free-VRAM floor), no lease daemon. **A `gpu-broker` service was never built and was deleted by
+   ruling in design v3.2** before Stage E ran.
 3. **Evidence-first workflow**: every acceptance gate is a committed artifact (run dir +
    report + ledger row); "done" means gate-pass + evidence committed, never "it looks fine".
 4. **Numeric acceptance methodology**: frozen grid, worst-observed vs measured resolution
    floor, no curve-fitting to pass gates. E2b's gate design (≤2× floor, 52/52 PASS,
-   worst 0.12%) is the template for all future gates.
+   worst 0.12) is the template for all future gates.
 5. **Ledger / issue discipline**: numbered ledger rows (D1…D27), issues as durable
    memory — this is what let the Stage E sessions survive compaction at all.
+6. **Digest launch path**: `orchestrator/resolve.py` (audits repo:tag → MANIFEST digest vs live
+   image ID, runs BY DIGEST, refuses unmanifested) + `pull_policy: never` — verified code, carried.
+7. **MinIO backup mechanics**: nightly backup + versioned buckets + passed restore drill
+   (Stage A5/A6) — the ops discipline carried into the in-app MinIO service.
+
+> **Correction (2026-11-14 source-integrity pass):** an earlier revision of this section listed
+> "physics-gate/ (FastAPI service)" and "gpu-broker/" as carried-forward *code*. Verified false —
+> no such service code exists in any repo (grep across all sources; see
+> `PHASE1-ARCHITECTURE-DISCOVERY.md` §1.2/§4.1 C1–C3). Stage E's real tool surface was
+> terminal+ssh+docker with the GitHub issue/ledger as state. What actually carries forward is
+> listed above.
 
 ## 2. What failed and is removed in v2
 
