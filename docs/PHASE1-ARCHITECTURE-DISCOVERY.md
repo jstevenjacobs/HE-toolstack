@@ -81,7 +81,9 @@ Initial release = Milestones M0–M2 (vertical slice + engine breadth + fleet). 
 - NFR-02 Performance: M0 slice e2e < 10 min wall (CPU-only assumption, §3-A4); no invented GPU targets (§15 open).
 - NFR-03 Scalability: single → multi worker path exists but is not load-bearing in initial release.
 - NFR-04 Security: no secret in any diff (gitleaks CI, proven); loopback-only API bind; containers non-root where upstream allows.
-- NFR-05 Maintainability: ≤4 stack images; one compose project; per-ticket cleanup clause.
+- NFR-05 Maintainability: one compose project; narrow-scope images, one per capability (per
+  ruling D-10); per-ticket cleanup clause. *(Revised 2026-11-14: previously stated "≤4 stack
+  images", superseded by D-10.)*
 - NFR-06 Observability: health endpoints + structured logs mandatory; metrics/Grafana optional profile.
 - NFR-07 Portability: whole app = repo + `.env` + compose bring-up (the v3 invariant, retained).
 - NFR-08 Data integrity: digests on every dataset/artifact; append-only ledger; versioned objects + restore drill (retain Stage A discipline).
@@ -155,16 +157,16 @@ Initial release = Milestones M0–M2 (vertical slice + engine breadth + fleet). 
 
 | ID | Decision | Status | Basis / revisit condition |
 |----|----------|--------|---------------------------|
-| D-01 | Single compose app owns all stack services incl. MinIO | Accepted (user ruling 2026-11-14) | Orphan evidence C4; refs: compose specs |
+| D-01 | Single compose app owns all stack services incl. MinIO | **Accepted** (user ruling 2026-11-14) | Orphan evidence C4; refs: compose specs |
 | D-02 | Workflow control = externalized files (state.json + ledger + handoff notes) + ~200-line runner; **no LangGraph yet** | Proposed (my recommendation; supersedes nothing) | O'Reilly checkpoint pattern; LangGraph OSS resume docs (self-healing only on durable-exec platform); AWS durable-exec docs; **revisit on**: parallel fan-out, durable multi-day waits, crash-restart supervision |
-| D-03 | **gpu-broker stays deleted** (v3.2 ruling honored): queue serialization + admission, no broker daemon | Proposed (restores the actual ruling, correcting my DESIGN-v2 error) | v3.2 text [E]; revisit if multi-host fleet lands |
-| D-04 | GPU tier ownership on 5060 Ti: budget for compute vs embeddings (4.98 GiB pinned, closed) vs sglang remote | **OPEN — needs user ruling** | C6 re-measure first |
-| D-05 | Single state owner = host `/home/steven/HE-toolstack` (+ named container bind); artifact → state → ledger write-ahead order | Proposed | C7/A9 evidence; fixes three-filesystems-per-run |
+| D-03 | **gpu-broker stays deleted** (v3.2 ruling honored): queue serialization + admission, no broker daemon | **Accepted** (user ruling 2026-11-14, via D-04=B: "no broker daemon" premise held) | v3.2 text [E]; revisit if multi-host fleet lands |
+| D-04 | GPU tier on shared 5060 Ti: **Option B — shared with hard budget.** One concurrent GPU job (queue serialization); per-job VRAM request ceiling 8 GiB (proposed number, confirm in Phase 2); protected floor: admission refuses if free VRAM would drop below 5.5 GiB (protects pinned embeddings, closed area); **no M0–M2 acceptance criterion may depend on GPU**; GPU class enabled only after ticket C6 (re-measure card state + sm_120 driver floor ≥591.59, Windows-side). | **Accepted** (user ruling 2026-11-14) | Contention analysis + MIG/MPS unavailable on GeForce [E]; embeddings B5.1 [E] |
+| D-05 | State owner: **Option 1 — host directory owns run state** (`/home/steven/HE-toolstack/heat-data` on `/dev/sdf` ext4, bind-mounted into the single compose app; uid-aligned writes kill the chown workaround). **Write-ahead ordering is normative: (1) artifacts fsync → (2) state.json atomic rename → (3) ledger append + push.** Agent scratch dirs are non-authoritative by definition — deletable without asking. | **Accepted** (user ruling 2026-11-14) | Three-filesystems evidence §1.3; D25 state/artifact divergence; restore-drill mechanics live on host tree [E] |
 | D-06 | physics-gate: keep script methodology (gate.py + probes + negative test), expose behind one toolserver endpoint | Proposed | D2 gate evidence [E] |
-| D-07 | Artifact layout `heat-data/runs/<run-id>/` on host, hot; MinIO receives gate-passed + ledger + dataset tier only | Proposed | C4 retention discipline; backup/restore drill carried |
+| D-07 | Artifact layout `heat-data/runs/<run-id>/` on host, hot; MinIO receives gate-passed + ledger + dataset tier only | Proposed (consistent with D-05 ruling) | C4 retention discipline; backup/restore drill carried |
 | D-08 | One SQLite (run registry + queue + lease) co-located with workflow engine | Proposed | revisit if contention/fleet |
 | D-09 | `he` client in the agent container, HTTP/JSON, no MCP (v3.8.1 ruling retained) | Proposed (already in force) | contract v3.8.1 [E] |
-| D-10 | Image consolidation target ≤4 (ta-runtime, fea-mesh-cad, python-tools, base) | **OPEN** — content check pending | C5 |
+| D-10 | Image consolidation: **no consolidation — keep the 6 verified images separate; narrow-scope images rule going forward.** User ruling: "more images with more narrowly defined scopes will be more maintainable as the established toolstack needs to be adapted in the future." Supersedes DESIGN-v2 §2.3's "consolidate to 4" and my Option-2 proposal (fold CoolProp into toolserver image). New-tool rule: new capability = new narrow image, never additions to existing solver images. | **Accepted** (user ruling 2026-11-14) | User rationale (future adaptability); supports D8/D13/D14 build-isolation lessons + resolve.py blast-radius argument |
 | D-11 | gpu1 excluded from compute tier (ARM64 + LLM duty) | Proposed | 1.3 [V] |
 | D-12 | Physics core (TaSMET fork, dataset, gate, evidence) migrates as-is; patches 0004-equivalent is M0 scope | Accepted (direction) | E/E2b evidence [E] |
 
@@ -185,9 +187,15 @@ Initial release = Milestones M0–M2 (vertical slice + engine breadth + fleet). 
 
 ## 7. Human decisions required before/at Phase 2 sign-off
 
-1. **D-04 GPU tier** (budget on 5060 Ti, or CPU-only for the whole initial release?).
-2. **D-05 state owner** confirmation (host-owned + bind-mount vs container-managed volume).
-3. **D-10 image consolidation**: approve concrete target contents, or defer consolidation to build tickets.
-4. Approve **D-02** (files-first, LangGraph-with-tripwires) as the workflow-decision posture for review.
-5. Confirm migration stance (§16 preview): new app = new names; PD-toolstack evidence repos stay frozen;
-   orphan MinIO data copied (not moved) into the app bucket before teardown.
+**Ruled 2026-11-14 (user):** D-04 = **Option B** (shared GPU w/ hard budget; 8 GiB job ceiling +
+5.5 GiB protected floor as proposed defaults — confirm/adjust in Phase 2); D-05 = **Option 1**
+(host-owned state + write-ahead ordering); D-10 = **no consolidation — keep 6 narrow images
+separate** (user rationale: narrow-scope images are more maintainable as the toolstack adapts;
+supersedes my fold-CoolProp-into-toolserver suggestion and DESIGN-v2's "consolidate to 4").
+
+**Still open at Phase 1 close:**
+1. D-02 posture confirmation (files-first, LangGraph only on named tripwires).
+2. Migration stance (§16 preview): new app = new names; PD-toolstack evidence repos stay frozen;
+   orphan MinIO data copied (not moved) into the app bucket before teardown; C6 re-measure filed
+   as a prerequisite ticket for GPU-class enablement.
+3. D-04's exact numbers (8 GiB / 5.5 GiB) — defaults proposed, adjustable in Phase 2 review.

@@ -25,9 +25,11 @@ before work starts.
   issues (#41, #42) text into `evidence/pd-archive/`. Done-check: `make verify-archive`
   counts committed evidence files vs manifest; fresh-context delegate can answer "what was
   E2b's gate result" from repo alone. *(1 session)*
-- **C3 host orphan teardown** — stop/remove compose project `infra` (`infra-minio-1`,
+- **C3 host orphan teardown** — copy (not move) orphan MinIO bucket contents into the app
+  bucket (D-01; §7 item 2), then stop/remove compose project `infra` (`infra-minio-1`,
   config `/home/steven/PD-toolstack/infra/minio-compose.yml`) + its volume; verify Cognee
-  stack untouched. Done-check: `docker ps -a | grep -c minio` == 0 on host; Cognee healthcheck
+  stack untouched. Done-check: object counts copied == source before removal;
+  `docker ps -a | grep -c minio` == 0 on host after app MinIO is up; Cognee healthcheck
   green. *(1 session)*
 - **C4 working-copy archival** — host `~/PD-toolstack` + container `~/PD-toolstack` +
   `PD-toolstack-ops` → one tarball each in archive dir, then remove; runbooks extracted to
@@ -38,15 +40,19 @@ before work starts.
 
 ## Pass 0 — Milestone 0 (the vertical slice; all green or M1 does not open)
 
-- **T0.1 compose skeleton** — `compose.yaml` single project: toolserver, solver,
-  physics-gate, gpu-broker, minio (+bucket env), postgres optional-off. Images minimal:
+- **T0.1 compose skeleton** — `compose.yaml` single project: toolserver, workflow-engine,
+  physics-gate, minio (+bucket env), postgres optional-off; the 6 verified tool images
+  registered profile-gated (D-10: kept separate, no consolidation). Images minimal:
   stub endpoints. Done-check: `make up` all-healthy under ONE project label;
   `make down` → `docker ps -a` empty. *(1 session)*
-- **T0.2 broker + gpu1 worker wired** — job JSON → FIFO queue → gpu1 execution → log/run
-  capture, via `he` HTTP client only. Done-check: submitted no-op job finishes; run dir
-  exists; broker survives worker restart without lease loss. *(1 session)*
-- **T0.3 TaSMET bake + trivial solve** — minimal closed sCO2 loop config built on gpu1
-  (TaSMET source pin recorded in `stacks/`); solve returns converged run through broker.
+- **T0.2 serialized queue wired** — job JSON → workflow-engine SQLite FIFO queue (D-03/D-04:
+  no broker daemon; host is the sole worker, D-11; CPU class) → execution via the existing
+  digest-pinned tool images → log/run capture, via `he` HTTP client only. Done-check:
+  submitted no-op job finishes; run dir exists; queue survives engine restart without job
+  loss (write-ahead ordering per D-05). *(1 session)*
+- **T0.3 TaSMET trivial solve on host** — minimal closed sCO2 loop config built on the host
+  (TaSMET fork source pin recorded in `stacks/`; patches 0001–0003 replayed); solve returns
+  converged run through the queue on the `ta-solver-runtime` digest.
   Done-check: run dir contains solution files + entropy-residual readout; pin committed. *(1–2 sessions — largest risk, sized first)*
 - **T0.4 physics-gate carry-forward + M0 verdict** — gate image from PD-toolstack code;
   E1/E2b regressions become unit tests. Done-check: `make gate RUN=<m0>` emits 5-check
@@ -61,9 +67,10 @@ before work starts.
 
 - **M1 engine breadth**: sCO2 recompression + combined Brayton/Rankine build manifests;
   registry fills; gate verdicts on all canonical points (E2b grid becomes M1 regression).
-- **M2 fleet**: gpu2 into broker pool; concurrency/throughput ticket; lease-preservation
-  regression under 2 workers.
-- **M3 design-time/operate-time split**: optimizer as broker job-type; data-lake layout in
+- **M2 fleet readiness**: worker registration contract exercised with the host as sole
+  worker; GPU class enabled only after C6 re-measure passes (D-04: 8 GiB ceiling, 5.5 GiB
+  protected floor, max-concurrency 1); concurrency/throughput ticket on the serialized queue.
+- **M3 design-time/operate-time split**: optimizer as queue job-type; data-lake layout in
   MinIO (`he-artifacts` bucket); the old Stage E surface rebuilt against a working loop.
 - **M4 observability**: prometheus/loki/tempo/grafana under `--profile observability` only;
   never required for green.

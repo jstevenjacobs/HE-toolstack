@@ -54,7 +54,10 @@ incidental context:
    in-chat state (job ids, run paths). Replaced by plain HTTP/JSON tools + durable external
    state (§3, §4).
 3. **Per-tool micro-containers** (8 images for 4 services): multiplied build, pin, health,
-   and log surface without buying isolation. Consolidated to 4 images (§3).
+   and log surface without buying isolation. *(Superseded by ruling D-10, 2026-11-14: NO
+   consolidation — the 6 verified images stay separate; narrow-scope images are the standing
+   rule for future adaptability. The v1 "8 images" problem was 8 images for 4 services; the
+   corrected rule is 1 narrow image per capability.)*
 4. **Side-car MinIO as a separate compose project** (`infra/minio-compose.yml`, project
    `infra`, still running as an orphan on the host): a second compose app has no business
    owning stack storage. Replaced by a service in the single compose app with its bucket
@@ -73,23 +76,22 @@ he/
   compose.yaml            # single app: all services, one network, one project name
   .env.example            # every knob; no secrets committed
   services/
-    toolserver/           # image 1: ALL read/inspect tool endpoints (FastAPI)
+    toolserver/           # NEW image: ALL read/inspect tool endpoints (FastAPI)
                           #   read_solution, inspect_case, solve_job_status, list_runs,
                           #   diff_runs, entropy-residual readout ...
-                          #   (replaces pd-read + pd-solve-gate + pd-browse: 1 image)
-    solver/               # image 2: TaSMET build baked in at deploy time (pin recorded);
-                          #   long-running solve endpoints; writes runs to workspace volume
-    physics-gate/         # image 3: carry forward from PD-toolstack (proven);
-                          #   E1/E2b regressions become its unit tests
-    gpu-broker/           # image 4: carry forward (proven); gpu1 host as remote worker
+    physics-gate/         # NEW image: carries the gate METHODOLOGY (gate.py pattern);
+                          #   no gate service existed in v1 (correction, §1) — this is new
+                          #   code; E1/E2b regressions become its tests
     minio/                # service, NOT a side-car app; bucket `he-artifacts` defined
-                          #   via compose environment; MinIO CONSOLE + S3 API on the
-                          #   internal network only
-  stacks/                 # per-engine build manifests (what gets built on gpu1)
+                          #   via compose environment; S3 API on the internal network only
+    workflow-engine/      # NEW image: the ~200-line runner + SQLite (queue/registry/lease)
+                          #   GPU jobs serialized here (no broker daemon - D-03)
+  solver images           # EXISTING 6 verified images (D-10: kept separate, run as
+                          #   profile-gated one-shot services via resolve.py by digest)
+  stacks/                 # per-engine build manifests
   workflows/              # §4 state: goal.md, ledger.md, tickets/, runs/<id>/
   registry/               # candidate registry (flat files on volume, MinIO for blobs)
-  he/                     # tiny python client (pip -e) the agent uses for HTTP calls,
-                          #   json_get/json_post pattern from Stage D kept
+  he/                     # tiny python client (pip -e) the agent uses for HTTP calls
 ```
 
 Consumption surface for the agent: **plain HTTP/JSON + `he` client**. Rationale (internet,
@@ -99,8 +101,9 @@ layer and its poll-scripting overhead. If editor/IDE integration is wanted later
 facade can wrap the same REST tools without changing the stack (LangGraph's deep
 MCP/LangChain integration makes that a one-node change).
 
-Host topology unchanged: WSL2 boxes, one GPU (gpu1), no nested virtualization on host —
-the proven pattern: heavy solver builds compile on gpu1, containers mount artifacts.
+Host topology (D-04/D-11-corrected): the stack runs as one compose app on the WSL2 host; the
+only CUDA device is the host RTX 5060 Ti (shared, budgeted per D-04); gpu1 (GB10/ARM64) is the
+LLM host, **not** a compute worker; heavy builds happen on the host itself.
 
 ## 4. Workflow engine (the #1 fix)
 
@@ -143,14 +146,16 @@ data, not durable execution).
 
 **Milestone 0 ("trivial engine, whole loop", one compose up, one engine, one route)**:
 
-> Deploy `he` stack → agent builds a minimal **closed sCO2 loop** engine config on gpu1 →
-> run solve → entropy-residual readout → physics-gate verdict → run dir + registry entry →
-> ledger checkpoint. Nothing else exists until this route works end to end.
+> Deploy `he` stack → agent builds a minimal **closed sCO2 loop** engine config →
+> run solve (serialized queue, CPU class) → entropy-residual readout → physics-gate verdict →
+> run dir + registry entry → ledger checkpoint. Nothing else exists until this route works
+> end to end.
 
 Milestone 0 acceptance (all mechanical, all visible in one `make verify`):
 - M0a: `docker compose up -d --build` reaches all-healthy; single project label; `compose down`
   leaves zero containers (v1's orphan problem, tested explicitly).
-- M0b: one solve job completes via broker queue on gpu1 through HTTP only.
+- M0b: one solve job completes through the serialized queue (workflow-engine SQLite, D-03)
+  via HTTP only — CPU class (D-04: no M0–M2 acceptance depends on GPU).
 - M0c: physics-gate returns a verdict JSON on the M0 run with all 5 checks computed.
 - M0d: registry + ledger rows written; a fresh session can answer "what is done / what's next"
   by reading `workflows/` only — verified by a delegate_task child with no other context.
@@ -160,7 +165,8 @@ Milestone 0 acceptance (all mechanical, all visible in one `make verify`):
 **Then thin horizontally, each pass a ticket-sized increment**:
 - M1: engine breadth — real sCO2 recompression + combined Brayton/Rankine configs;
   candidate registry fills.
-- M2: fleet — gpu2 joins broker pool; throughput sweep.
+- M2: fleet readiness — worker registration contract exercised (host as sole worker; GPU tier
+  enabled per D-04 after C6); throughput sweep on the serialized queue.
 - M3: optimizer + data lake (the old Stage E design-time/operate-time split), now built
   against a working loop, not ahead of one.
 - M4: observability (Prometheus/Loki/Grafana/Tempo as *optional compose profiles*
