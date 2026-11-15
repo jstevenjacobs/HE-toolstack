@@ -1,6 +1,6 @@
 # HE-toolstack Requirements Baseline
 
-**Document:** `HE-TOOLSTACK-REQUIREMENTS.md` · v1.1 (rev 2026-11-15: +NFR-22 backup root per ruling D-14) · 2026-11-14
+**Document:** `HE-TOOLSTACK-REQUIREMENTS.md` · v1.2 (rev 2026-11-15: architecture-review response — FR-01/NFR-07/NFR-10/NFR-22 revised, NFR-23/24 added per FINDING-01/02/05/06/07; +NFR-22 v1.1 D-14) · 2026-11-14
 **Status:** Baseline for review (Phase 2 deliverable C of DesignStandards §8)
 **Upstream sources:** Phase 1 report (`docs/PHASE1-ARCHITECTURE-DISCOVERY.md`, commit `141249d`)
 §2–§5; PD-toolstack `STACK-DESIGN-v3.md` (v3.8.1) and `STACK-AS-BUILT.md` (D-ledger D1–D27);
@@ -64,8 +64,8 @@ existing solver images.
 
 | ID | Description | Pri | Rationale / refs | Verification | Acceptance criteria |
 |----|-------------|-----|------------------|--------------|---------------------|
-| FR-01 | Agent submits a solver job via documented HTTP POST returning `job_id` immediately (async model). | P0 | [P] Agent must not hold an HTTP connection open for hours; P1 §2 FR-01 | T-08 (contract), T-01 (e2e) | POST returns 202 + job_id < 2 s while job runs to completion; OpenAPI schema published by toolserver |
-| FR-02 | Job status (queued/running/succeeded/failed/cancelled), per-attempt log tail, and artifact URIs readable via GET by `job_id`. | P0 | [P]; D25 lesson: agent blind to job state after disconnect [E SA D25] | T-08, T-02 | Status transitions observable within 5 s of occurrence; failed jobs carry attempt count and last 100 log lines |
+| FR-01 | Agent submits a solver job via documented HTTP POST returning `job_id` immediately (async model). | P0 | [P] Agent must not hold an HTTP connection open for hours; P1 §2 FR-01 | T-08 (contract), T-01 (e2e) | POST returns **201 Created** + `{job_id, queue_pos}` < 2 s while job runs to completion (canonical code = tech design §7.2, aligned v1.2 per FINDING-07); OpenAPI schema published by toolserver |
+| FR-02 | Job status — canonical set per tech design §8.2 (queued/running/blocked_retryable/succeeded/failed/cancelled/orphaned), evidence-promotion sub-state (FR-15), per-attempt log tail, and artifact URIs readable via GET by `job_id`. | P0 | [P]; D25 lesson: agent blind to job state after disconnect [E SA D25] | T-08, T-02 | Status transitions observable within 5 s of occurrence; failed jobs carry attempt count and last 100 log lines |
 | FR-03 | Agent may cancel a queued job (best-effort) or request abort of a running job (SIGTERM then grace-window SIGKILL). | P1 | [P]; long CFD runs need an escape hatch | T-08, T-09 | Cancel of queued = terminal `cancelled` no side effects; abort of running stops container within grace window and records exit code |
 | FR-04 | Submission is idempotent via client-supplied `Idempotency-Key`: duplicate POST with same key returns the original `job_id`, never enqueues twice. | P0 | [P]; duplicate job = duplicated side effects (P1 G1) | T-08 | 100 duplicate POSTs → exactly 1 queued job |
 | FR-05 | Every mutation endpoint is documented in a machine-readable contract committed to the repo (OpenAPI + error envelope schema). | P0 | [P]; DesignStandards §7 prohibits fabricated interfaces — contract is the artifact | T-08 | Schema validates all request/response fixtures; error envelope identical across endpoints (§6 of tech design) |
@@ -191,7 +191,7 @@ existing solver images.
 | ID | Description | Pri | Rationale / refs | Verification | Acceptance criteria |
 |----|-------------|-----|------------------|--------------|---------------------|
 | NFR-06 | No secret is ever committed; gitleaks runs in CI on every push. | P0 | [E SA: gitleaks CI proven] | T-13 | CI fails on seeded fake secret; clean on merge |
-| NFR-07 | Toolserver binds loopback only (`127.0.0.1`), no inbound from the compose network or LAN in initial release; auth deferred behind this boundary and documented as deferred (tech design §10). | P0 | [P]; single-operator trust model [E A8] | T-15 | Port scan from a second container on the compose net fails; from host loopback succeeds |
+| NFR-07 | Toolserver is reachable **only via host loopback**: compose publishes `127.0.0.1:8100:8100` (published-address binds host loopback — no LAN/compose-net path; internal bind `0.0.0.0` inside its own namespace is required for the `-p` mapping and is not exposure). The agent's client URL is `http://host.docker.internal:8100` — the agent container's own `127.0.0.1:8100` CANNOT reach it (loopback is namespace-local, verified 2026-11-15 [V]). Auth deferred behind this boundary and documented as deferred (tech design §10). | P0 | [V probes 2026-11-15 + FINDING-01]; single-operator trust model [E A8] | T-15 | Test executed **from inside the Hermes runtime container**: `host.docker.internal:8100` succeeds; agent-side `127.0.0.1:8100` fails (namespace isolation proof); port scan from a second container on the compose net fails; host-loopback scan succeeds; host-side curl alone does NOT count as passing |
 | NFR-08 | Containers run non-root where upstream allows (calculix already proven [E]); any root container is an explicit, logged exception with reason. | P1 | [E] | T-15 | compose audit lists user per service; exceptions carry reason strings |
 | NFR-09 | Image provenance: only digests in the repo `MANIFEST` run (`pull_policy: never`); a digest outside MANIFEST is refused by the dispatcher. | P0 | [E resolve.py/MANIFEST discipline; A6 no registry] | T-16 | Submit job with foreign digest ⇒ refused with named check |
 
@@ -199,7 +199,7 @@ existing solver images.
 
 | ID | Description | Pri | Rationale / refs | Verification | Acceptance criteria |
 |----|-------------|-----|------------------|--------------|---------------------|
-| NFR-10 | One compose project owns every stack service including MinIO (D-01); nothing stack-owned runs outside it. | P0 | [E C4: orphaned infra-minio-1 with no consumer] | T-13 | After full deploy, `docker compose ls` shows exactly one he-project (plus non-stack externals listed in tech design §11.9) |
+| NFR-10 | Ownership is by declared class (tech design §6.10, D-01 A1): **C** — one compose project owns every long-running stack service incl. MinIO; **J** — one-shot job containers are engine-owned, labeled `he-stack=1`, janitor-reconciled; **X** — documented infrastructure exceptions (host backup timer; §11.9 externals). Nothing stack-owned runs outside these classes. After `make down` (= compose down + janitor sweep), **zero containers of classes C∪J exist**; running jobs at shutdown are SIGTERMed and recorded `interrupted`, never silently orphaned. | P0 | [E C4: orphaned infra-minio-1 with no consumer]; FINDING-02 [GitHub #3] | T-13 | `docker compose ls` shows exactly one he-project (plus §11.9 externals); after `make down`, `docker ps -a -f label=he-stack=1` is empty AND compose ps is empty; shutdown with a running job yields state `interrupted` in registry + ledger entry |
 | NFR-11 | Narrow-scope images (D-10 ruling): one capability per image; new tool = new image; solver images are **append-frozen** (no new tools added to them). | P0 | [U ruling 2026-11-14, user rationale: future adaptability] | T-16 | CI check: image tag list == MANIFEST list; PRs touching solver Dockerfiles beyond tool version bump flagged |
 | NFR-12 | Every implementation ticket carries a cleanup clause; transient artifacts (scratch, probes, clones) deleted or declared durable in the done-check. | P0 | [E] user observation on cleanup; Stage-E practice | T-12 | Done-check text includes cleanup attestation; stale-scratch sweep reports clean tree at each milestone gate |
 
@@ -229,7 +229,7 @@ existing solver images.
 |----|-------------|-----|------------------|--------------|---------------------|
 | NFR-18 | Cold-session resume ≤ 10 min wall incl. harness (FR-36); state is never *only* in agent context. | P0 | [V A12] | T-02 | Timed cold-session run in ledger |
 | NFR-19 | Documented host-reboot recovery: compose `restart: unless-stopped` brings stack back; in-flight jobs resolved per FR-37 matrix with zero manual repair. | P1 | [P] | T-05 | Reboot drill logged at M1 |
-| NFR-22 | Canonical backup root: **all backups** of authoritative stack state land under `/mnt/c/Users/steven/OneDrive/Backup/HE-toolstack/` (Windows path; WSL-visible from the agent container; OneDrive-managed). Layout: `heat-data/` (nightly mirror), `repo/` (git bundle of ledger/state/workflows), `drills/` (T-11 evidence). No other backup destination is authoritative; restore reads the same path. | P0 | [V user ruling 2026-11-15; path verified on host, `HE-toolstack/` subdir exists] | T-11 | Backup job writes only under `BACKUP_ROOT`; T-11 drill restores from it via WSL and digests match; OneDrive reports the items as synced |
+| NFR-22 | Canonical backup root: **all backups** land under `/mnt/c/Users/steven/OneDrive/Backup/HE-toolstack/` (operator ruling D-14; restore reads the same path; no other destination authoritative). Layout: `heat-data/`, `repo/` (git bundle), `drills/`. **Consistency is normative (D-14 A1 / FINDING-05):** SQLite via sqlite3 online-backup API (WAL-safe), MinIO via `mc mirror` + sha256 manifest (`mc` confirmed in-image [V]), artifacts content-addressed (race-safe); stage on ext4 → verify → atomic completion marker into destination; post-copy `PRAGMA integrity_check` + manifest check + OneDrive read-back. `rsync` exit 0 is NOT evidence of consistency. Full procedure: tech design §6.9. | P0 | [V ruling 2026-11-15 + host path check]; FINDING-05 [GitHub #6] | T-11 | Drill takes a backup **while jobs run**, restores the full sequence (§6.9 restore order), reconciles DB/run-state/manifests, `integrity_check` clean, digests match, OneDrive read-back verified |
 
 ### 3.10 Extensibility
 
@@ -239,6 +239,9 @@ existing solver images.
 | NFR-21 | GPU-class enablement is one config flag + C6 evidence, not a code change (FR-18). | P2 | [P] | T-06 | Flag flip rehearsed in staging compose profile |
 
 ---
+
+| NFR-23 | Health reporting distinguishes **liveness** (`/healthz`: process serving), **readiness** (`/readyz`: required deps usable — DB, engine for toolserver), and **dependency health** (`/deps`: per-dependency ok/degraded/down + backlog depth). MinIO never gates liveness/readiness of solver execution. Agents see the three states distinctly in responses. | P0 | FINDING-06 [GitHub #7] | T-10 | With MinIO killed: `/healthz`+`/readyz` 200, `/deps` minio=down + backlog>0; with engine killed: toolserver `/readyz` 503 while `/healthz` 200; agent status payload carries the degraded marker |
+| NFR-24 | Container/state reconciliation invariant: no container labeled `he-stack=1` exists that is not either (a) a compose service, (b) a running/claimed job with a registry row, or (c) pending janitor cleanup within grace (≤15 min [P]). Hourly janitor + boot reconciliation enforce; every sweep writes `reconcile_log`. |
 
 ## 4. Verification suite (test IDs referenced above; full strategy in tech design §14)
 
@@ -290,11 +293,15 @@ MO=minio, REG=registry(SQLite-in-WE), HEA=he-client, HD=heat-data(host dir), IM=
 | NFR-15 | OPS(repo+.env+seed) | T-13 |
 | NFR-16…17 | HD, MO, REG | T-04, T-11 |
 | NFR-18…19 | HD, WE, OPS | T-02, T-05 |
-| NFR-22 | OPS, HD | T-11 |
+| NFR-22 | OPS, HD, WE | T-11 |
+| NFR-23 | TS, WE, HEA | T-10 |
+| NFR-24 | WE, OPS | T-09, T-13 |
 | NFR-20…21 | IM, WE, TS(core) | T-14, T-06 |
 
 No requirement is unmapped; no component appears without at least one requirement
 (vocabulary §1 services: `agentcad`→FR-15; every T-id is referenced above).
+Counts v1.2: 23 FR + 43 NFR = 66 IDs (FR-41/42 = M3+ boundary rows, excluded from the
+initial-release matrix per design standards §15).
 
 ## 6. Open requirements (numbers not established — DesignStandards §15 rule)
 
