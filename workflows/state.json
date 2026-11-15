@@ -1,0 +1,9 @@
+{
+  "project": "HE-toolstack Phase 2 - Documentation production",
+  "phase": 2,
+  "cursor": "P2.1",
+  "completed": ["P2.0"],
+  "tickets_open": ["P2.1", "P2.2", "P2.3", "P2.4", "P2.5"],
+  "updated": "2026-11-14T15:50:00-06:00",
+  "notes": "Phase 1 gate cleared at 141249d (D-04=B, D-05=1, D-10=separate all Accepted). P2.0 = ticket registration (this file's creation). Deliverable order follows dependency: REQUIREMENTS -> ADR -> TECHNICAL-DESIGN -> DESIGN-REVIEW -> QA report. Each ticket: <=3-line done-check verified same session, ledger row with ref: per non-trivial decision."
+}
