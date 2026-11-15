@@ -1,6 +1,6 @@
 # HE-toolstack Requirements Baseline
 
-**Document:** `HE-TOOLSTACK-REQUIREMENTS.md` · v1.2 (rev 2026-11-15: architecture-review response — FR-01/NFR-07/NFR-10/NFR-22 revised, NFR-23/24 added per FINDING-01/02/05/06/07; +NFR-22 v1.1 D-14) · 2026-11-14
+**Document:** `HE-TOOLSTACK-REQUIREMENTS.md` · v1.3 (rev 2026-11-15b: review-response 2 — NFR-07 client URL corrected to bridge-gateway form [V probe], T-17/18/19 added; v1.2: FR-01/NFR-07/NFR-10/NFR-22 revised, NFR-23/24 added per FINDING-01/02/05/06/07; +NFR-22 v1.1 D-14) · 2026-11-14
 **Status:** Baseline for review (Phase 2 deliverable C of DesignStandards §8)
 **Upstream sources:** Phase 1 report (`docs/PHASE1-ARCHITECTURE-DISCOVERY.md`, commit `141249d`)
 §2–§5; PD-toolstack `STACK-DESIGN-v3.md` (v3.8.1) and `STACK-AS-BUILT.md` (D-ledger D1–D27);
@@ -191,10 +191,17 @@ existing solver images.
 | ID | Description | Pri | Rationale / refs | Verification | Acceptance criteria |
 |----|-------------|-----|------------------|--------------|---------------------|
 | NFR-06 | No secret is ever committed; gitleaks runs in CI on every push. | P0 | [E SA: gitleaks CI proven] | T-13 | CI fails on seeded fake secret; clean on merge |
-| NFR-07 | Toolserver is reachable **only via host loopback**: compose publishes `127.0.0.1:8100:8100` (published-address binds host loopback — no LAN/compose-net path; internal bind `0.0.0.0` inside its own namespace is required for the `-p` mapping and is not exposure). The agent's client URL is `http://host.docker.internal:8100` — the agent container's own `127.0.0.1:8100` CANNOT reach it (loopback is namespace-local, verified 2026-11-15 [V]). Auth deferred behind this boundary and documented as deferred (tech design §10). | P0 | [V probes 2026-11-15 + FINDING-01]; single-operator trust model [E A8] | T-15 | Test executed **from inside the Hermes runtime container**: `host.docker.internal:8100` succeeds; agent-side `127.0.0.1:8100` fails (namespace isolation proof); port scan from a second container on the compose net fails; host-loopback scan succeeds; host-side curl alone does NOT count as passing |
+| NFR-07 | Toolserver is reachable **only via host loopback**: compose publishes `127.0.0.1:8100:8100` (published-address binds host loopback — no LAN/compose-net path; internal bind `0.0.0.0` inside its own namespace is required for the `-p` mapping and is not exposure). The agent's client URL is **`http://172.17.0.1:8100`** (docker bridge gateway; auto-discovered by
+`he`, `HE_API_BASE` overrides) — verified reachable end-to-end from inside the Hermes container
+2026-11-15 [V]. Neither the agent's own `127.0.0.1:8100` (namespace-local) nor
+`host.docker.internal` (refused host loopback binds in the same probe battery [V]) is the client
+URL. Auth deferred behind this boundary and documented as deferred (tech design §10). | P0 | [V probes 2026-11-15 + FINDING-01]; single-operator trust model [E A8] | T-15 | Test executed **from inside the Hermes runtime container**: `host.docker.internal:8100` succeeds; agent-side `127.0.0.1:8100` fails (namespace isolation proof); port scan from a second container on the compose net fails; host-loopback scan succeeds; host-side curl alone does NOT count as passing |
 | NFR-08 | Containers run non-root where upstream allows (calculix already proven [E]); any root container is an explicit, logged exception with reason. | P1 | [E] | T-15 | compose audit lists user per service; exceptions carry reason strings |
 | NFR-09 | Image provenance: only digests in the repo `MANIFEST` run (`pull_policy: never`); a digest outside MANIFEST is refused by the dispatcher. | P0 | [E resolve.py/MANIFEST discipline; A6 no registry] | T-16 | Submit job with foreign digest ⇒ refused with named check |
 
+| T-17 | Agent-container connectivity probe (FINDING-01; runs **from inside** a container like the agent's, host-side curl does not count) | e2e network | NFR-07, FR-01 |
+| T-18 | Backup consistency + OneDrive-offline staleness alarm (sqlite `.backup` product integrity; `backup_stale` escalates) | drill | NFR-22 |
+| T-19 | Daemon-restart reconciliation drill RC-3 (restart dockerd mid-job → re-adopt/re-queue per §8.6, gapless ledger) | drill | NFR-24, §12.5 RC-3 |
 ### 3.5 Maintainability
 
 | ID | Description | Pri | Rationale / refs | Verification | Acceptance criteria |
