@@ -584,3 +584,317 @@ and the p95 latency budget honest (NFR-04).
   no runtime dependency on the frozen repo (it stays source-of-information only [U ruling]).
 - **TBD, explicitly:** multi-host worker protocol (M3+ ADR; not fabricated here); auth
   headers (F-1); webhook/event callbacks (no consumer exists — none invented).
+
+---
+
+## 8. Workflow and Orchestration Design
+
+### 8.1 The state law (normative)
+`workflows/` files, tickets, and this ledger **are** the operational state (D-02: "workflow
+files = state"). Rules: (1) a ticket is *open* only if its file exists in
+`workflows/tickets/`; (2) progress claims are `claimed: <session>, <ISO time>` lines written
+**before** work (single-writer discipline — if two sessions see the same claim, the earlier
+timestamp wins, later yields); (3) completion = a ≤3-line done-check (what changed, how
+verified, cleanup attestation) + ledger row + commit (NFR-12 makes the attestation
+mechanical via CI lint); (4) machine state (queue, registry, run state.json) lives in
+heat-data; `workflows/` lives in the repo and is *human/agent-legible* — a session with zero
+memory must be able to answer "what is in flight, what is next, what is blocked" with
+`ls workflows/tickets/ && cat workflows/state.json` (NFR-14; T-02 harness).
+
+```mermaid
+stateDiagram-v2
+    [*] --> open: ticket file created (claimed line = single-writer)
+    open --> in_progress: claimed: session, ts (written BEFORE work)
+    in_progress --> in_progress: progress commits (ledger rows)
+    in_progress --> blocked: blocker recorded in ticket file (why + unblock condition)
+    blocked --> in_progress: unblocked (evidence appended)
+    in_progress --> done: done-check <=3 lines + verification refs + cleanup attestation
+    done --> [*]: commit + ledger row; ticket file remains (history, not state)
+```
+*Diagram 5 — ticket lifecycle (the human-visible half of orchestration; D-02 state law).*
+
+### 8.2 Job/run state machines (machine half; SQLite, single writer = engine)
+Job: `queued → admitted → running → {succeeded | failed | cancelled}`, plus
+`degraded-evidence` (physics done, evidence step blocked — §6.5) and `stale-lease` (crash
+recovery re-queues, §8.6). Run: `created → active → gate_pending → {succeeded | failed} →
+promoted`; terminal states immutable. **Transition guards (DB triggers):** →`succeeded`
+requires gate report with matching digests (§6.7); GPU-class jobs cannot leave `queued`
+while class flag off (FR-18); `admitted` commits the VRAM reservation atomically.
+
+### 8.3 The M0 vertical slice (flow definition [P]; content lineage: D2 pipeline [E])
+```mermaid
+flowchart LR
+    C[config gen<br/>agent-authored JSON, FR-04] --> S[solve_1d<br/>ta-solver-runtime job<br/>digest-pinned FR-16]
+    S --> P[post-process<br/>same image, thin step]
+    P --> G[physics-gate<br/>gate.py + probes + negative test<br/>FR-20/21; T-03]
+    G --> L[ledger append + git push<br/>ref: fields FR-33]
+    L --> M[MINIO PROMOTE<br/>gate-passed manifest, versionIds FR-28/29]
+    G -- verdict=fail --> X[run failed<br/>no promotion; artifacts kept for post-mortem]
+```
+*Diagram 6 — M0 slice. One end-to-end path before breadth (Phase-2 rule "M0 vertical
+slice"); CPU-only; GPU machinery present-but-off is acceptable here because no arrow needs
+it (FR-19).*
+Step exec is runner-driven (§6.2): each arrow is one job submission; state.json per run
+records step boundaries (D-05 artifacts→state→ledger order visible in file timestamps +
+`journal/` sub-record).
+
+### 8.4 Single-writer points
+SQLite WAL: engine = RW, toolserver = insert-only (busy_timeout). `workflows/`: claim-before-
+work convention + git merges as backstop. heat-data run dirs: only the job container holds
+its run-dir RW bind during `running`; promote worker is sole MinIO writer; ledger: engine
+sole appender (agent edits go through tickets, not the ledger). Git: engine pushes; agent
+repo edits and engine ledger commits share the remote via fetch-rebase-retry loop (push
+contention = transient, retried; [P], reviewed at M0).
+
+### 8.5 Idempotency and replay
+Every mutation carries an idempotency key (§7.1); step exec re-check (FR-38): a step re-run
+finds `manifest.json` with its expected outputs + digests → skips to boundary. Promote is
+versioned puts (re-put = new versionId, registry keeps latest — T-11 tolerates the dup).
+Git push retry is naturally idempotent (no-op when up to date).
+
+### 8.6 Crash recovery (engine boot + lease timeouts)
+On boot / lease expiry (60 s [P]): for each `running` job → probe container: exists →
+re-adopt (renew lease); gone → inspect artifacts vs manifest: complete → advance state
+(the fsync-boundary case); partial → re-queue step (idempotent exec absorbs it); state.json
+ahead of artifacts (impossible under D-05 ordering — detected as `integrity_violation`, run
+quarantined for human review, never auto-"fixed"). Registry rebuilt-ability (NFR-02) is the
+ultimate backstop; the matrix T-07 enumerates kill points at every arrow of diagram 6.
+
+### 8.7 Escalation to a durable-execution framework (tripwires)
+[proposal, D-02] **Trigger (any one):** runner growth >500 LOC; ≥2 distinct state-machine
+shapes needed (e.g. human-approval steps); retry/replay logic duplicated in >2 places;
+resume failures exceeding 1/month in practice. **Migration shape:** queue+registry survive
+as-is; runner step-exec becomes framework activities; `workflows/` state law unchanged
+(files stay authoritative view). **Cost estimate:** ~1 service + ops overhead on a box
+already running 3 stacks [V] — unjustified today; revisit at M2 review with T-07/T-02 stats
+as evidence.
+
+---
+
+## 9. Data Architecture and Storage
+
+### 9.1 Storage tiers and ownership (D-05 applied)
+| Tier | Store | Content | Authority | Writer | Backup |
+|------|-------|---------|-----------|--------|--------|
+| Hot | `heat-data/runs/<id>/` (ext4 [V]) | state.json, journal, work, artifacts + manifest.json (sha256s) | **canonical** | job containers + engine | host-dir backup (`/home/steven/HE-toolstack/` convention) |
+| Registry | `heat-data/stack.db` (SQLite WAL) | queue, candidates, evidence links, job_types, idempotency | canonical-but-rebuildable (derivable from tier-1+ledger) | engine | same dir |
+| Cold evidence | MinIO `he-promoted` (volume under heat-data) | gate-passed manifests' files, versioned | immutable copy | promote worker | MinIO versioning + host-dir backup |
+| Git evidence | repo `workflows/` + ledger + docs | narrative state, decisions, done-checks | canonical for *process* | engine + agent (ticket files) | GitHub remote (A3) |
+| Scratch | agent container dirs | anything | **non-authoritative by definition** → deletion always safe | agent | none (by design) |
+
+### 9.2 Canonical layout (normative directory contract — NFR-14/T-02 readable without logs)
+```
+/home/steven/HE-toolstack/heat-data/          # D-05 owner dir (/dev/sdf ext4)
+├── runs/<run_id>/
+│   ├── state.json        # atomic rename; step boundaries, digests (§8.3)
+│   ├── journal/          # append-only step events (crash forensics, FM-8)
+│   ├── work/<job_id>/    # per-job writable (solver I/O lives HERE — D9 lesson)
+│   ├── artifacts/        # fsync'd outputs + manifest.json {path,size,digest}
+│   └── gate_report.json  # §6.3 output (gate-verified run only)
+├── stack.db (+-wal/-shm)                     # queue+registry (§6.7)
+├── ledger/               # ledger working mirror (engine sole appender)
+├── minio/                # MinIO data volume (in-project, in-owner-dir — D-01/D-05)
+└── quarantine/           # integrity_violation runs (§8.6) — review, never deleted silently
+```
+Repo-side (git): `workflows/state.json`, `workflows/tickets/*.md`, `workflows/ledger.md`,
+`docs/MANIFEST` (image → digest pin), `deploy/docker-compose.yml`, `deploy/.env`,
+`images/<name>/Dockerfile` (one per capability, D-10), `ci/`.
+
+### 9.3 Data model — core entities
+```json
+{
+  "run_id": "r-01HX…", "parent_run": null, "goal": "ring-liner-v3 sweep point 12",
+  "state": "gate_pending",
+  "config_digest": "sha256:…", "tool_versions": {"ta-solver-runtime": "sha256:4a9…", "property-pipeline": "sha256:7c2…"},
+  "steps": [{"name":"solve_1d","job_id":"j-01…","exit":0,"manifest":"artifacts/manifest.json#solved"}],
+  "gate": {"verdict":"pass","report":"gate_report.json","covered_digests":["sha256:…"]},
+  "evidence": {"ledger_rev":"9f2…","minio":[{"bucket":"he-promoted","key":"r-01…/solved.csv","version_id":"…"}]}
+}
+```
+Registry tables mirror this queryably (§6.7); `config_digest` is the join key for sweep
+comparisons (FR-34).
+
+### 9.4 Retention and deletion
+Runs: hot tier retained until explicitly archived (disk watermark: engine alerts at 80 %
+of /dev/sdf, refuses new runs at 95 % — FM-6; deletion is human/operator choice, never
+automatic — physics evidence is the product). Promoted objects: MinIO versioning with
+Keep-Version retention, no auto-expiry [proposal; revisit when >500 GB]. Git: append-only.
+Scratch: 24 h pruning, safe by §9.1 definition. Backup cadence: heat-data nightly rsync to
+second disk (`/home/steven/backups` pattern [E]); RPO = last nightly + git (NFR-19).
+
+### 9.5 Versioning and integrity
+Images: semver tags + immutable digest pins in `docs/MANIFEST`; `pull_policy: never` means
+"what runs is what was admitted" (FR-16/T-16 CI check both directions). Artifacts: sha256 in
+manifest at fsync boundary; gate + promote + registry each re-verify on read (NFR-16).
+State: atomic rename = single valid version at all times (partial writes impossible by
+construction). Config: compose + `.env` committed minus secrets (§10.3); every parameter
+cross-referenced §11.6.
+
+---
+
+## 10. Security Design
+
+### 10.1 Threat model (proportionate: single trusted operator, one physical box, no
+internet-facing surface)
+| Threat | Vector | Mitigation | Residual |
+|--------|--------|-----------|----------|
+| Stray process / other container reaching stack API | compose net or LAN hit :8100 | loopback bind enforced (entrypoint fail-fast check §11.6) + no published port on compose net; T-15 negative test | host-local processes (same trust domain — accepted) |
+| Data exfil / tamper via credentials in repo | gitleaks CI [E-proven pattern]; secrets only in `deploy/.env` (gitignored) + env injection | `.env` file perms 600, host uid 1000 | operator disk trust |
+| Container escape via spawn channel | OQ-5 docker.sock mount | preferred resolution: sidecar-scoped socket (option b) — flagged as the review-gate decision, NOT swept under a default | if option (a) chosen: host-trust equivalent, documented |
+| Malformed params → solver abuse (path traversal, arg injection) | toolserver validation | schema-enforced params (allowlist per job_type), run-dir jail (bind only that dir; `--network none`; read-only rootfs where image allows) | solver-internal bugs (out of scope; images are pinned OSS) |
+| Supply chain (image substitution) | registry pull | A6: no pulls at runtime (`pull_policy: never`) + digest admission + MANIFEST CI (FR-16/NFR-11); seed script writes digests from build provenance | seed-tar tampering = host trust; Chainguard question OR-05 |
+| Prompt-injection-adjacent (agent tricked into destructive API calls) | agent compromise is upstream of stack | idempotency not authority: no destructive endpoints exist (no delete/overwrite paths in §7.2 — deletion is filesystem-only, human-mediated) | honest note: full agent-integrity is a platform concern, out of scope here |
+### 10.2 Authentication/authorization
+**None at the HTTP layer — by explicit design** (loopback = the control; F-1). No JWT/API
+keys are implied anywhere in §7. Cross-container: shared Docker network isolation + MinIO
+root creds scoped to engine container env only. Deferred options (never claimed present):
+mTLS or token auth if the bind ever moves off loopback — that move *requires* an ADR.
+### 10.3 Data protection
+At rest: no encryption at rest on host ext4 (single-user workstation trust; stated, not
+hidden); MinIO SSE not enabled initial release [proposal, revisit at M2]. In transit: HTTP
+loopback (no TLS — same trust domain); to GitHub: HTTPS/git over TLS (platform); to MinIO
+from tool containers: in-network plain HTTP *only on the internal bridge* — flagged.
+Secrets: `.env` + env-injection; gitleaks; the cognee/agent PATs live outside the stack
+entirely.
+### 10.4 Least privilege / audit
+All services non-root (uid 1000; calculix image already runs non-root [V]; NFR-08 audit
+test). Solver jobs: `--network none`, read-only rootfs where possible, single run-dir bind.
+Audit = JSON logs (NFR-13: every mutation request line carries trace_id; engine state
+transitions are the audit trail by construction — §5.4-6 "state is filesystem-visible") +
+append-only ledger + git history. No log rotation service — docker json-file max-size caps
+[M0]; log-integrity claims deliberately modest.
+### 10.5 Compliance / data handling
+Personal data: none processed. Physics data license: OSS solver terms respected (all images
+OSS-licensed builds [E]). Evidence immutability is an *engineering integrity* requirement
+(D-05/gate), implemented via versioning + append-only + digest checks — not claimed as
+compliance-grade tamper-evidence.
+
+---
+
+## 11. Deployment and Operations
+
+### 11.1 Environments
+**dev** = the same host, run at the agent's working checkout (heat-data dir `…/heat-data-
+dev` override) — no fake second env invented. **prod** = `/home/steven/HE-toolstack/heat-
+data`, compose from repo `deploy/`. Paradox acknowledged: one box; the *config* differences
+are path + published-console + restart-policy — listed in §11.6 (nothing hidden in code).
+
+### 11.2 Prerequisites (host, documented, checked by `make preflight`)
+WSL2 + Docker Engine ≥ [host's installed version — recorded by preflight, not asserted from
+memory]; image tars pre-seeded (§6.8, A6); heat-data dir at uid 1000 (D-05); `/dev/sdf`
+mount healthy; Ollama embeddings live (co-resident check, informational); GPU probe logged
+(C6 state recorded at every preflight — honesty mechanism).
+
+### 11.3 Compose topology [P — the normative file lives at `deploy/docker-compose.yml`]
+Services: `toolserver` (build `images/toolserver`, loopback `127.0.0.1:8100:8100`),
+`workflow-engine` (build `images/workflow-engine`, binds heat-data rw, OQ-5 spawn channel,
+`depends_on: minio: healthy`), `minio` (image digest-pinned in MANIFEST, `pull_policy:
+never`, volume `./heat-data/minio`, ports `127.0.0.1:9000/9001` operator-only). Profiles:
+`gpu` (adds `gpu-probe` sidecar that samples nvidia-smi into heat-data/metrics/ when host
+passthrough verified — inert until C6), `console`, `postgres` (F-2 parked). Tool images are
+NOT compose services (one-shot spawns per job — §6.2) except none-run-daemons: correct —
+zero long-running solver containers (verified stance carried from attempt 1 [E]).
+Every service: healthcheck, `restart: unless-stopped`, json-file caps, `user: "1000:1000"`
+where image supports (audit NFR-08), image pinned by **digest** not tag (T-16).
+
+### 11.4 Configuration management
+Layering (precedence low→high): compose defaults → `deploy/.env` (committed `.env.example`,
+real `.env` gitignored 600) → (no third layer initial release — no config service invented).
+Every knob in §11.6 is read by exactly one named component; CI greps for env reads without
+a table row (config drift gate [P]). Secrets: none in git (gitleaks); the two secret-adjacent
+items = MinIO root creds (`.env`) + git push credential on the host/engine side (§6.2), both
+env-injected.
+
+### 11.6 Configuration parameter table (cross-referenced §6; [proposal] = new here)
+| Key | Default | Consumer | Notes |
+|-----|---------|----------|-------|
+| `HE_DATA` | `/home/steven/HE-toolstack/heat-data` | all | D-05 owner dir |
+| `TS_BIND` / `TS_PORT` | `127.0.0.1` / `8100` | toolserver | bind non-overridable away from loopback (entrypoint guard) [proposal] |
+| `QUEUE_DB` | `$HE_DATA/stack.db` | engine+toolserver | WAL |
+| `MAX_CONC_CPU` / `MAX_CONC_GPU` | `2` [proposal] / `1` (D-04) | engine | gpu=1 is a ruling, not tuning |
+| `GPU_VRAM_CEILING_GIB` | `8` (D-04, OQ-2) | admission | job-declared ceilings validated against it |
+| `GPU_RESERVED_FLOOR_GIB` | `5.5` (D-04, OQ-2) | admission | protects sglang+Ollama co-residency [E: 4.98 GiB measured] |
+| `GPU_CLASS_ENABLED` | `false` until C6 ticket passes | admission | FR-18/19 |
+| `LEASE_TIMEOUT_S` | `60` [proposal] | engine | crash recovery §8.6 |
+| `IDEMPOTENCY_TTL_H` | `24` | toolserver | FR-39 |
+| `QUEUE_MAX_DEPTH` | `200` [proposal] | toolserver | 429 beyond |
+| `DISK_WARN_PCT` / `DISK_HARD_PCT` | `80` / `95` [proposal] | engine | FM-6 watermark |
+| `MINIO_BUCKET` / endpoint | `he-promoted` / `http://minio:9000` | promote | in-net |
+| `MINIO_CONSOLE_BIND` | `127.0.0.1` [proposal] | compose | operator UI posture |
+| `LEDGER_REMOTE` | `origin/main` | engine | A3 queue-on-failure |
+### 11.5 (numbering preserved — see note*) Sections 11.5/11.6 order per standards =
+environments, build, topology, config layering, parameters, ops; deployed order here:
+**Build:** host seed script builds 6+ images from `images/*/Dockerfile` (one capability per
+Dockerfile — D-10) → writes `docs/MANIFEST` digests → compose `build:` only for the 2 new
+thin services. **Deploy:** `git pull && make preflight && make up` (one command; T-13 on
+teardown). **Rollback:** compose `image:`/MANIFEST git revert + `make up` (images are
+append-frozen so old digests always exist locally — rollback is one `make up`, minutes
+[measured basis: local image ops [E]]). **Migration:** stack.db schema via `PRAGMA
+user_version` step-scripts run at engine boot (single-writer safe). **Smoke after deploy:**
+`make test-smoke` = T-01 echo + healthz trio + zero-orphan `down/up` cycle.
+
+### 11.7 Monitoring [proposal — minimal, no metrics stack (F-3)]
+Signals with *owners and thresholds*: engine loop heartbeat (log age >30 s → warn), queue
+depth (warn >20), disk watermark (§11.6 — engine refuses), WAL checkpoint lag (weekly
+`wal_checkpoint` check in `make doctor`), `make doctor` composes: healthz trio, preflight
+re-run, lease-stuck scan, orphan scan (T-13 as ongoing hygiene), digest admission drift
+check. Alerts = ledger note + agent-visible file (`heat-data/ALERTS.md`) — the agent is the
+on-call; no pager system claimed.
+
+### 11.8 Operational runbooks (each: symptom → verify → act → verify — DesignStandards §7
+prohibition: no step a fresh session can't run blind)
+- **R-1 stack down/unresponsive:** `make ps` → `make logs svc=X tail=200` → per §6.1/6.2
+  shutdown designs: crash ⇒ `make up` (WAL recovers; §8.6 boot pass) ⇒ smoke ⇒ ledger note.
+  If WAL corrupt (impossible-unless-disk-fault): restore nightly backup (R-4), rebuild
+  registry (derivable §9.1).
+- **R-2 stuck job / lease storm:** `make doctor` lease scan → cancel via API (§7.2) → if
+  container live: engine cancel path (SIGTERM→kill) → if spawn-channel broken: R-5.
+- **R-3 GPU class won't admit:** check `GPU_CLASS_ENABLED` + C6 ticket state + probe file
+  (profile `gpu`); expected *normal* state until C6 — do not "fix" by toggling flag (FR-18
+  ruling).
+- **R-4 restore:** fresh host dirs from nightly rsync → `make up` → T-11 drill: pull one
+  promoted object by versionId, digest-compare → run M0 slice (§11.5 smoke proves it).
+- **R-5 spawn channel broken (OQ-5 dependent):** sidecar restart (`make up workflow-engine`
+  scoped) → verify via `make test-smoke` → if docker.sock class issue: host docker service
+  check (host action — documented as out-of-stack).
+- **R-6 evidence degraded (`degraded-evidence` state):** minio healthz → creds env present →
+  promote retries auto; if bucket-missing: recreate bucket (idempotent) — runs already
+  succeeded stand (design §6.5).
+- **R-7 disk full:** engine refuses at hard watermark (FM-6); operator archives cold runs to
+  archive disk (promotion copies exist in MinIO) — decision support: `du` report command.
+
+---
+
+## 12. Reliability and Failure Analysis
+
+### 12.1 Failure-mode table
+| ID | Failure | Likelihood (basis) | Impact | Detection | Mitigation (design) | Recovery | Tested |
+|----|---------|--------------------|--------|-----------|---------------------|----------|--------|
+| FM-1 | toolserver crash | med (any new code) | API unavailable; jobs unaffected | healthz fail | stateless edge; auto-restart policy | auto; idempotent client retries | T-07 kill matrix |
+| FM-2 | engine crash mid-step | med | step orphaned; lease holds until timeout | boot pass + lease scan | §8.6 re-adopt/re-queue; idempotent exec | ≤ lease_timeout + step re-run | T-05, T-07 |
+| FM-3 | queue (WAL) corruption | low (WAL; ext4) | queue+registry down | healthz + boot integrity check | nightly backup + rebuild-from-ledger path | restore + registry rebuild (hours [proposal]) | T-07 |
+| FM-4 | job container OOM/killed | med | job failed | exit code capture | per-class mem limits; failure = terminal, artifacts kept | re-submit; post-mortem via journal/ | M2 fault-inject |
+| FM-5 | GPU probe volatility (C6 materializes persistently) | **already occurred [V]** | GPU class stays off | admission conservative; preflight logs state | CPU-only Option A always available; no M0–M2 gate depends (FR-19) | C6 ticket passes → flag on | T-06 simulated |
+| FM-6 | heat-data disk full | med (1 TB shared disk [V]) | all runs stall | disk watermark refuse + ALERTS.md | engine refuses new (protects *in-flight*), R-7 archive path | operator archive; verified by run re-flow | M2 fault-inject |
+| FM-7 | MinIO down at promote time | low-med | evidence degraded, physics fine | `degraded-evidence` state | promote decoupled (§6.5), auto-retry | R-6; backlog flushes when up | T-11 variant |
+| FM-8 | torn state.json | designed-out [P-claim] | session misreads state | N/A (atomic rename) | rename-on-write + digest in ledger | — | T-07 write-window kill |
+| FM-9 | git remote unreachable | real precedent [E Stage-E friction] | ledger local-only | push-retry counter in logs | local queue + retry (A3); process continues | push drains on restore | contract-test w/ mock remote [proposal] |
+| FM-10 | image digests drift from MANIFEST | low | wrong-bits physics | admission refuses (`409 digest_unpinned`) + CI | pull_policy never; seed is the writer | re-seed / MANIFEST update via ADR-shaped review | T-16 |
+### 12.2 Backups & restore
+Backup = host-dir rsync (nightly, second disk) + git remote; **RPO:** ≤24 h for hot tier
+(nightly cadence; git near-real-time for process state) — stated openly as weak spot,
+improvement path = hourly incremental [proposal, M2 decision]. **RTO:** fresh install =
+seed script (pre-baked tars) + `make up` + rsync restore + R-4 drill; target ≤60 min
+[proposal — validated by the drill itself, the *only* credible metric source].
+
+### 12.3 Graceful degradation
+GPU off ⇒ CPU class full throughput (the *designed* steady state until C6). MinIO down ⇒
+`degraded-evidence`, physics continues. git down ⇒ ledger queues. Embeddings/LLM co-resident
+down ⇒ stack unaffected (boundary §2.6 — no runtime dependency). Every degradation lands in
+ALERTS.md + ledger, never silently.
+
+### 12.4 Operational readiness vs long-term ops
+M0 is explicitly "single operator + agent" scale: runbooks exist so a *fresh agent session*
+is the operator (T-02 doubles as ops-readiness proof). No 24/7 posture claimed; if usage
+exceeds one operator's attention (metric: ALERTS.md volume at M2 review), tripwire §8.7 /
+F-3 revisited with data.
