@@ -898,3 +898,255 @@ M0 is explicitly "single operator + agent" scale: runbooks exist so a *fresh age
 is the operator (T-02 doubles as ops-readiness proof). No 24/7 posture claimed; if usage
 exceeds one operator's attention (metric: ALERTS.md volume at M2 review), tripwire §8.7 /
 F-3 revisited with data.
+
+---
+
+## 13. Performance and Scalability
+
+### 13.1 Expected load (honest small numbers, no invented scale)
+Single agent session submits ≤2 jobs concurrently (queue bound 200 is headroom, not
+expectation); job mix: sweeps of tens–hundreds of solve_1d jobs (seconds–minutes each [E
+D2 pipeline timings]) vs occasional CFD jobs (tens of minutes–hours, CPU-bound — D9-class
+work). Read paths (status/candidates) see bursts of agent polling (~1 req/30 s/session
+[proposal assumption [U]]). API envelope: payloads <1 MiB (§7.4), p95 read target NFR-04
+(T-09 measures under T-08 load gen; no number pre-claimed).
+
+### 13.2 Hot paths and bottlenecks
+1. **GPU: 1 concurrent job, by ruling** — GPU throughput is *capped by policy*, not tuned;
+   class is off anyway until C6 (FM-5). 2. **CPU class: N cores ÷ MAX_CONC_CPU** — queueing
+   theory is the design (FIFO + priority tie-break; no fancy scheduling claimed). 3. SQLite
+   WAL single-writer: insert-only toolserver path keeps write contention trivial at this
+   volume; the known ceiling (≈single-digit thousands writes/s local WAL) is ~3 orders above
+   load — revisit trigger: >50 submissions/s sustained (never expected; F-2 = postgres trip
+  _wire, recorded not acted). 4. heat-data I/O: solver I/O stays in run work dirs on ext4
+   (D9's 28–39× lesson is the measured baseline for what *not* to do [E]); promote is
+   sequential puts off the hot path. 5. git push per ledger row: seconds-scale, serialized
+   in engine — fine at row-per-run volume; row-per-step would need batching (flag, not
+   built).
+
+### 13.3 Scalability strategy (what grows first, and how)
+Order: (a) **more tools** — designed-in: image+service+registry row, zero core diff (NFR-20
+proven at M1 via T-14); (b) **more queue volume** — WAL is the first suspect; F-2 migration
+path exists in-table (SQLite→postgres behind the same DAO module boundary [P design rule:
+queue access only through `queue.py`]); (c) **more compute** — multi-host workers require the
+broker re-ADR (D-03 revisit clause) + worker protocol (explicitly un-specified, §7.5); the
+Worker seam (§6.2) is the one hedge we paid for: spawn is already behind an interface. No
+horizontal-scaling story is claimed beyond that — single-host is the scope (§2.3).
+
+### 13.4 Caching (short, true list)
+Embeddings cache = Ollama's (external). Solver warm starts = job-type param (dataset-
+specific, not architecture). Idempotency map = the only server-side cache (§6.1) — 24 h TTL,
+uuid4 keys collide-safe. nvidia-smi sample cache 30 s (§6.4). Nothing else cached, so no
+cache-invalidation surface exists.
+
+---
+
+## 14. Alternatives Considered
+
+Full evidence lives in `HE-TOOLSTACK-ADR.md` (12 ADRs incl. rejected options D-02/D-03/D-05/
+D-08/D-09/D-10/D-12/X-1…X-8 with rejection reasons). The five architecture-level ones:
+**D-01 single compose vs split infra** — split re-created the C4 orphan exactly as observed;
+rejected. **D-02 files-first engine vs LangGraph/Temporal** — durable-exec platform cost on
+a 3-stack box for a checkpoint-resume pattern that ~200 LOC + tripwires covers; rejected with
+*explicit* migration triggers (§8.7), not vibes. **D-03 dispatcher admission vs broker
+daemon** — the broker was designed, never built, and deleted (C1 [E]); admission is a pure
+function over queue truth; rejected *a priori* as over-engineering for single-host, kept as
+M3+ re-ADR. **D-05 host-dir state owner vs bind-volume owner** — a named host path is what
+the agent can `ls`/`jq` and what backup operators understand; bind-volume owner hides state
+from the resume contract; rejected. **D-10 N narrow images vs ≤4 consolidated** — the
+consolidation target was *my* v2 draft; the operator's ruling (narrow scope = maintainability
+for future adaptation) replaces it outright [U→ruling]; rejected with cost honestly on the
+table (≈9.4 GB raw [V], per-image seed step) and accepted because the ruling owns the
+tradeoff.
+
+---
+
+## 15. Technology Stack and Dependencies
+
+| Layer | Choice | Version (verified basis) | Why / evidence | Upgrade owner |
+|-------|--------|--------------------------|----------------|---------------|
+| Orchestrator | Docker Compose v2 | host Docker Engine [preflight records; no version asserted here] | lifecycle ruling D-01 | operator via compose file review |
+| Lang runtime (stack services) | python 3.12-slim base | 3.12 [V — same base as proven property-pipeline/agentcad images] | consistency w/ proven images; D14 amd64-only | image bump = ADR + FR-22 bit-check |
+| Web framework | FastAPI + uvicorn | pinned at first build (TBD — **not claimed**, none verified yet) | OpenAPI = contract tests T-08 free | dependabot-style manual, CI green |
+| Queue/registry store | SQLite WAL | stdlib sqlite3 (host python 3.13 / image 3.12 — both ≥ WAL era) | D-08; zero-ops, rebuildable | F-2 trip-wire |
+| Object store | MinIO | image digest-pinned in MANIFEST (version = what seed script baked [V host: infra image existed]; tag recorded by MANIFEST, not here) | proven drill [E] + in-project (D-01); Chainguard rebuild OR-05 | seed script + MANIFEST rev |
+| S3 client | boto3 | pinned first build | promote worker only | same |
+| Solver images | 6 capability images | **measured inventory [V]**: openfoam-esi:2606 2.82 GB; ta-solver-runtime:tasmet-e1 1.78 GB; agentcad:py3.12 1.97 GB; gmsh:4.15.2 1.55 GB; calculix:2.23 1.0 GB; property-pipeline:cp7.2.0 0.31 GB | built+battle-tested attempt 1 (D8/D13/D14 lessons baked in) [E] | append-frozen: new version = new tag + digest bump + ADR-shaped review |
+| Physics libs in-image | CoolProp/OCCT/armadillo etc. | CoolProp 7.2.0 hash-pinned [V via image name+D13] | D13 lesson: provenance over convenience | property ADR only |
+| CI | GitHub Actions + gitleaks + pytest | gitleaks pattern ran in attempt-1 CI [E] | proven pattern | repo owner |
+| Git remote | github.com/jstevenjacobs/HE-toolstack | [V] | ledger evidence + docs | — |
+[proposal] rows: toolserver/workflow-engine/client code, seed script, compose file — none
+exist yet; tagged [P] throughout §6 and CI-gated so absence stays visible (C1 defense).
+
+---
+
+## 16. Phased Implementation Plan
+
+Each milestone = acceptance criteria (test IDs) + required test results + cleanup evidence +
+exit gate; cleanup clause per NFR-12: *every* ticket's done-check includes scratch/
+artifact/temp-branch removal attestation — checked by CI lint, not memory.
+
+**M0 — vertical slice works (diagram 6).** *Deliverables:* compose 3 services, seed script,
+heat-data layout, engine runner+queue (≤500 LOC budget — §8.7 tripwire counter starts),
+ta-solver-runtime + property-pipeline job types, gate path, ledger+promote, `he` client
+minimal. *Acceptance:* **T-01** (echo round-trip) + **T-04** (D2-config reproduced, gate
+pass, digests match E-ledger values [E]) + **T-07** crash-matrix pass (required M0
+artifact, D-02 honesty condition) + **T-13** zero-orphan + **OR-01 timing recorded** (<10 min
+target — measured, reported, not claimed). *Cleanup:* scratch dirs pruned, no stray
+containers/images post-suite, `make down` clean. *Exit gate:* all above green + fresh-session
+resume smoke (mini-T-02). ~[no date claim — sequencing: after OQ-5 + D-07/D-13 sign-off].
+
+**M1 — breadth: 6 tool classes + registry.** *Adds:* openfoam-esi/gmsh/calculix/agentcad job
+types, registry + gate-verification triggers, sweep comparison queries, candidate A/B
+bit-identity (FR-22). *Acceptance:* **T-03** (gate both entry paths byte-identical + negative
+test) + **T-10** (registry lifecycle incl. trigger-refusal) + **T-14** (5th-tool-add test
+with zero core diff) + **T-16** (digest admission) + NFR-08 non-root audit. *Exit gate:* T-14
+diff shows core untouched; ledger documents each image's digest provenance.
+
+**M2 — resilience hardening (pre-optimization confidence).** *Adds:* fault injection suite,
+lease/recovery tuning from real runs, backup drill wired to schedule, runbooks R-1…R-7
+proven by table-top exercise (fresh session runs each blind). *Acceptance:* **T-05** (reboot
+durability) + **T-06** (admission math incl. simulated nvidia-smi matrices; + live variant
+iff C6 has passed) + **T-11** (MinIO version restore drill) + **T-15** (negative-network
+probe) + **NFR-18/T-02** cold-session resume ≤10 min measured + tripwire review §8.7 +
+degradation drills (FM-7, FM-6 injected). *Exit gate:* crash-matrix re-run green on the
+*grown* codebase (runner LOC still ≤500 or tripwire fired & decided).
+
+**M3+ — boundary only (not scheduled work here).** Multi-host worker ADR (D-03 revisit),
+optimizer loop automation (FR-41), F-2/F-3 decisions with M2 telemetry, OQ-2 GPU re-measure
+outcome feeding capacity. **No functionality promised** — recorded so the Phase-1 lesson
+(premises outliving reality [C4/C5]) can't repeat as silent drift: these rows get re-
+verified before any M3 planning session, same discipline as C6.
+
+---
+
+## 17. Open Questions and Risks
+
+### 17.1 Open questions (each: why it matters / who decides / when)
+| ID | Question | Why it matters | Decides | When |
+|----|----------|----------------|---------|------|
+| OQ-2 | GPU VRAM ceiling/floor final values (D-04 defaults 8/5.5 GiB) + C6 re-measure ticket execution | gates `GPU_CLASS_ENABLED`; numbers are safety margins for co-resident LLM services | operator (Steven) w/ measured nvidia-smi data | before GPU profile activates; **not** blocking M0–M2 (FR-19) |
+| OQ-3 | PD-toolstack D-ledger historical import: which candidate rows are worth mining into the registry? | free provenance for sweeps vs migrating attempt-1 cruft | operator + agent triage pass | during M1 (registry live) |
+| OQ-4 | MinIO Chainguard-hardened rebuild (A11 open ticket [E]) — do it at seed-script authoring or leave digest-pinned OSS image? | supply-chain posture of the evidence tier | operator | before promote is load-bearing (M1) |
+| OQ-5 | **Job spawn channel** (§6.2): docker.sock mount vs scoped sidecar vs host-unit engine | decides the security-critical component; docker.sock = escape-class power in a container | operator (security posture call) | **M0 blocker** (runner can't spawn without it) |
+| OQ-6 | toolserver shares SQLite WAL vs engine-internal HTTP (§7.5) | coupling vs one-less-hop; both defensible | reviewer at formal review (§18) | design freeze |
+### 17.2 Risk register (top 5, owner + mitigation + contingency)
+| Risk | Owner | Mitigation | Contingency if it lands |
+|------|-------|-----------|------------------------|
+| C6: GPU passthrough stays broken (already observed [V]) | operator (ticket) | class off by default; T-06 simulated math; no gate depends (FR-19) | Option A permanent (CPU-only) — design loses nothing structurally |
+| OQ-5 forces the unsafe socket option | operator | sidecar preferred; review gate on this exact choice | accept documented host-trust equivalence, shrink blast radius elsewhere |
+| Phantom-component drift returns (C1 class risk) | docs+CI | evidence tags (§header), MANIFEST CI (NFR-11), §6 lineage rule | Phase-1-style spot audit (proven procedure, 1 day) |
+| Hand-rolled runner bugs > 500 LOC creep (D-02 gamble fails) | eng | LOC tripwire counter from M0, §8.7 triggers, T-07 as M0 gate | migrate per §8.7 (queue/registry/files survive) |
+| Disk growth outruns 1 TB shared volume [V: 813 GB free now] | operator | watermarks FM-6, R-7 archive path, retention §9.4 | second disk / archive tier before M3 planning |
+
+---
+
+## 18. Formal Review Readiness
+
+**Self-assessment vs §7 checklist.** Complete: every §6 component answers the §7 question
+set (problem, necessity, responsibilities, interfaces, data, dependencies, failure, tests,
+deployment, limits) or is explicitly [P]; requirements traceability 100% (63 IDs →
+components → T-tests, matrix in REQUIREMENTS §5, script-verified); interfaces specified at
+process boundaries (§7 all, incl. error envelope, timeouts, versioning, idempotency); no
+undocumented internals; failure modes tabled (FM-1…10) w/ recovery runbooks R-1…7;
+performance/limits stated w/ measurement plan (no unverifiable claims — every speed/size
+number cites [V]/[E] or is marked [proposal]/target); operational procedures testable by a
+fresh session (R-runs are the review artifact); migration/rollback/backup in §11/12;
+open questions **surfaced not hidden** (OQ-2…6). **Gaps acknowledged honestly:** performance
+numbers are targets + measurement plans, none measured (stack not yet built — saying so *is*
+the honesty requirement met); T-08/T-09 will revise §13.1 assumptions [U]; diagrams 1–8 are
+design views, matching the §6/§8 text they annotate. **External input needed:** OQ-5 (blocker),
+D-07/D-13 sign-off, OQ-2/OQ-4 timing (non-blocking), reviewer call on OQ-6. **Verdict
+(proposed):** *approve with exceptions* — condition: OQ-5 resolved before M0 build starts;
+nothing else found that changes structure.
+
+---
+
+## 19. Implementation Notes
+
+Coding/working rules that make the design keep working (process, not product):
+1. **Done-check ≤3 lines** per ticket (what changed / how verified / cleanup attestation) —
+   CI-linted presence (NFR-12). 2. **1 ticket per session default** — context-loss is the
+   design assumption, not the edge case (attempt-1 death mode [E D25]). 3. **Contracts before
+   endpoints:** T-08 fixture files merged *before* server code marks endpoints done (§5.4-5).
+   4. **Internet-first with `ref:` provenance:** solver invocations carry config+input+
+   code digests end-to-end (FR-13/T-12); no result without its `ref:` chain. 5. **Image =
+   capability** (D-10): a Dockerfile that grows a second tool is a review error — split it.
+   6. **Write-ahead ordering in code, not docs** (§5.4-3): one function `commit_boundary()`
+   in runner; tests assert order under kill -9 (T-07). 7. **Cleanup is acceptance** (user
+   standing ruling [U]): scratch pruned, temp branches deleted, `docker system prune`-class
+   leftovers = ticket not done. 8. **Legacy coexists, never entangles:** legacy PD-toolstack
+   refs are `legacy:`-tagged read-only rows + the `ref:` discipline from §19-4 covers
+   migrated assets; the frozen repo is cloned for the one-time import and never mounted at
+   runtime (§6.8). 9. **No silent auto-fix** (standing user rule): engine repairs crash
+   *state* per §8.6 only; physics verdicts are never auto-patched; integrity violations
+   quarantine + surface (ALERTS.md), a human/agent decides. 10. **Facts from the toolchain**
+   (Phase-1 law, user ruling [U]): doc claims update only from `docker images`, `nvidia-smi`,
+   compose ps — this doc's [V]/[E]/[P]/[U] tags are the pattern implementation.
+
+### Appendix A — Glossary
+gate: scripted physics-consistency verdict (pass/fail/warn/error) w/ negative-test lineage
+[D2]. Digest: sha256 content hash; pins images (MANIFEST) and artifacts (manifest.json).
+Ticket: one `workflows/tickets/*.md` file = unit of claimed work (state law §8.1). Run: one
+end-to-end physics attempt (state machine §8.2). Job: one container execution of one tool.
+Candidate: registry row = a run + its config/metrics/verdict/evidence. Class: cpu|gpu job
+category driving admission. Tier: hot (heat-data) / cold (MinIO) / git (process). Lease:
+time-boxed running-claim in queue enabling crash recovery. Slice: M0's single end-to-end
+path. Tripwire: pre-agreed condition that converts "feels wrong" into a decision (§8.7).
+
+### Appendix B — Diagram index (mermaid sources inline; 8 required views)
+D1 system context (§5.1) · D2 logical components (§5.2) · D3 deployment boundaries (§5.3) ·
+D4 network communication (§5.3) · D5 ticket lifecycle (§8.1) · D6 M0 flow (§8.3) ·
+D7 state-maintenance timeline (§D7 below) · D8 backup/restore sequence (§D8 below).
+
+### D7 — Data flow of one M0 run (write-ahead ordering visible end-to-end)
+```mermaid
+sequenceDiagram
+    participant A as agent (he client)
+    participant TS as toolserver
+    participant Q as queue (SQLite)
+    participant W as runner
+    participant C as solver container
+    participant HD as heat-data run dir
+    participant G as gate (in-image)
+    participant L as ledger/git
+    participant M as minio
+    A->>TS: POST /runs {config}
+    A->>TS: POST /jobs {tool, run_id} (Idempotency-Key)
+    TS->>Q: INSERT queued (BEGIN IMMEDIATE)
+    W->>Q: claim (admission: class+limits) -> running+lease
+    W->>C: docker run (digest, --network none, run-dir bind)
+    C->>HD: artifacts written + fsync, manifest.json
+    W->>HD: state.json atomic rename (boundary 1)
+    W->>Q: job succeeded (boundary 2)
+    W->>G: gate step in image -> gate_report.json
+    W->>L: ledger append + git push (ref: digests)
+    W->>M: promote gate-passed manifest files (versionIds)
+    W->>HD: state.json promoted (boundary 3)
+    A->>TS: GET /runs/{id} -> state, gate, evidence links
+```
+
+### D8 — Backup & restore (T-11 / R-4 normalized)
+```mermaid
+sequenceDiagram
+    participant H as host ops (rsync nightly)
+    participant HD as heat-data
+    participant M as minio (versioned)
+    participant N as fresh/rebuilt env
+    Note over HD: steady state: runs + stack.db + ledger mirror + minio/ volume
+    H->>HD: rsync -a (nightly, 2nd disk) [RPO <= 24h]
+    Note over M: promoted objects carry MinIO version IDs (registry-linked)
+    N->>HD: rsync restore from nightly
+    N->>M: make up (minio recovers from in-dir volume)
+    N->>M: GetObject(bucket,key,versionId) per registry evidence row
+    N->>N: sha256 compare vs registry digests (pass = restored)
+    N->>N: M0 smoke slice green = env trustworthy (R-4 done-check)
+```
+
+### Appendix C — Document QA self-check
+Every §6 component states its code lineage ([existing]/[P]/[asset]) — C1-class phantoms are
+structurally visible. Numbered cross-refs used: FR/NFR/T/OR (REQUIREMENTS v1.0), D/X/F/OQ
+(ADR v1.0), C/G (PHASE1), FM/R (this doc §11–12), D1…D14 (attempt-1 ledger evidence IDs).
+No performance number appears without [V]/[E]/[proposal] tag. Diagrams 8/8. Sections 19/19
+(§11.5/11.6 order note preserved at §11.6). Unverified: every pinned-version "at first build"
+row (§15) and OR-01 timing — both *deliberately* empty rather than guessed.

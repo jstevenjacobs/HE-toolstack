@@ -3,3 +3,4 @@
 | 2026-11-14 | P2.2 | HE-TOOLSTACK-ADR.md v1.0 — 12 accepted/proposed ADRs (D-01..D-12), 8 rejected alternatives visible for audit, 5 deferred, 4 unresolved questions; user-rulings marked verbatim (D-04/D-05/D-10) | ref: docs/HE-TOOLSTACK-ADR.md; provenance classes per PHASE1@141249d §5 |
 | 2026-11-14 | P2.3a | TECHNICAL-DESIGN chunk 1+2 (§1-7, diagrams 1-4, evidence tags [V/E/P/U], component lineage rule) | ref: docs/HE-TOOLSTACK-TECHNICAL-DESIGN.md |
 | 2026-11-14 | P2.3b | TECHNICAL-DESIGN chunk 3 (§8-12, diagram 5-6, threat model, runbooks R-1..R-7, FMEA FM-1..FM-10) | ref: docs/HE-TOOLSTACK-TECHNICAL-DESIGN.md |
+| 2026-11-14 | P2.3c | TECHNICAL-DESIGN chunk 4 (§13-19, diagrams 7-8, risk register OQ-2..6/FM risks, phased plan M0-M2+boundary, QA self-check) — document COMPLETE: 19/19 sections, 8/8 diagrams | ref: docs/HE-TOOLSTACK-TECHNICAL-DESIGN.md |
