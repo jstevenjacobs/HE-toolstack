@@ -117,14 +117,23 @@ inference only [V]), Ollama embeddings (`host.docker.internal:11434` [V]), SSH t
 (NFR-10).
 
 ### 2.7 Assumptions and constraints
-A1 single WSL2 host (JSJ-Office) remains the deployment target [V]; A2 no private registry
-this release (A6 inherited) [E]; A3 GitHub remote stays available for ledger pushes, degraded
-= local-commit queueing [P]; A4 all physics evidence to date is CPU-only — no GPU number may
-be claimed until C6 passes [V]; A5 agent runtime (Hermes container) can reach host loopback
-ports [V]; A6 uid 1000 maps host↔containers by convention [V]; A7 MinIO replaces only when
-requirements exceed it, none identified (D-01). Constraints: 8 GiB VRAM ceiling / 5.5 GiB
-floor (D-04, adjustable via OQ-2), 1 concurrent GPU job, CPU cores shared with co-resident
-services.
+Assumption IDs are **Phase 1's canonical register** (`PHASE1-ARCHITECTURE-DISCOVERY.md` §3,
+A1–A12) — this design adds A13–A15 and does not renumber them:
+- carried: **A2** [V] host ext4 volume holds stack root + heat-data (`/mnt/c` banned for
+  compute I/O); **A4** [V→drives design] all evidence-producing work so far is CPU-only — no
+  GPU number may be claimed until C6 passes; **A6** [V] no private registry — host-seed +
+  `pull_policy: never` + MANIFEST digests (A6 inherited [E]); **A8** [operator] single human
+  is operator and final gate authority; **A11** [to-verify] Chainguard MinIO rebuild track
+  available (→ OR-05); **A12** [V] no guarantee of agent chat-context durability — hence the
+  external-state requirement.
+- **added here:** **A13** [P] the GitHub remote stays available for ledger pushes; degraded =
+  engine local-commit queue with retry (§6.2). **A14** [V] the agent runtime can reach host
+  loopback ports (observed: toolserver/agent co-location on this host). **A15** [V by
+  convention] uid 1000 maps host↔container for bind-mounted state (attempt 1's chown
+  workarounds prove the friction of *not* designing for it).
+- constraints: 8 GiB VRAM ceiling / 5.5 GiB floor (D-04 defaults, adjustable via OQ-2), 1
+  concurrent GPU job, CPU cores shared with co-resident services, 1 TB disk shared with
+  co-resident stacks (813 GB free at audit [V]).
 
 ### 2.8 Initial release vs later releases
 Initial = M0–M2 (§16.1–16.4). Later = M3 fleet/multi-host (FR-41/42), M4 optimizer
@@ -170,12 +179,12 @@ reviewers can move both directions through the matrix.
 | Design docs listed components that never existed as code (C1: gpu-broker; C2: gate "service") | summaries copied forward without code verification | This doc's evidence tags; CI MANIFEST-vs-service check (NFR-11); Phase 1 verified inventory [V] |
 | gpu1 premise (DGX Spark as compute worker) | hardware reality moved: gx10-9d06 is GB10 **ARM64** running sglang; gpu2 (5090) never purchased [V] | D-04/D-11: host-only compute, ARM64 excluded, GPU budgeted + flag-gated |
 | `nvidia-smi` over SSH returned no rows this pass while the card exists (C6) | WSL GPU passthrough/driver state volatility [V] | GPU class inert until C6 re-measure ticket passes; T-06 uses simulated numbers until then |
-| Docker-run uid friction forced chown workarounds | container uid ≠ host uid on bind mounts [E A1] | heat-data at uid 1000 by design (D-05); NFR-08 non-root audit |
+| Docker-run uid friction forced chown workarounds | container uid ≠ host uid on bind mounts [E A15; Phase-1 A1 chown workaround] | heat-data at uid 1000 by design (D-05); NFR-08 non-root audit |
 
 ### 4.3 Previous → proposed migration comparison
 | Area | Previous (attempt 1) | Proposed (HE-toolstack) | Rationale | Risk carried |
 |------|----------------------|-------------------------|-----------|--------------|
-| Lifecycle | stack + separate `infra` project | one compose project incl. MinIO | orphan failure mode is ownership, not tech (C4) | healthcheck coupling on `up` (§11.5 profiles) |
+| Lifecycle | stack + separate `infra` project | one compose project incl. MinIO | orphan failure mode is ownership, not tech (C4) | healthcheck coupling on `up` (§11.3) |
 | GPU path | gpu-broker (designed) → deleted, never ran | dispatcher admission fn + queue class | a mechanism must exist where code exists (D-03, C1) | lease semantics deferred (worker seam, NFR-05) |
 | Workflow engine | LangGraph leaning (SD v3) + agent-memory state | files-first runner + SQLite; tripwires (§8) | resume-from-context-loss is a checkpoint pattern; durable-exec platform cost unjustified (D-02) | hand-rolled runner bugs → T-07 required M0 artifact |
 | State location | container scratch + host tree + git, no owner | `heat-data` host dir, write-ahead normative | single-writer collapse; cold-session `ls`/`jq` contract (D-05) | manual host-dir drift → digest checks NFR-16 |
@@ -193,7 +202,7 @@ sm_120)→C6 prerequisite; cleanup observation→NFR-12 per-ticket clause.
 
 ### 5.1 System context
 The agent runs in a Hermes container on the host's Docker Engine and reaches the stack via
-loopback HTTP (A5 [V]). The stack never calls the LLM; the LLM/embeddings services are
+loopback HTTP (A14 [V]). The stack never calls the LLM; the LLM/embeddings services are
 *co-residents to protect* (D-04 floor), not dependencies of any job. TaSMET/OpenFOAM/OCCT/
 CoolProp are in-image dependencies; GitHub is the evidence remote outside the boundary.
 
@@ -287,7 +296,7 @@ graph TB
     end
     TSc --- LB; WEc -- bind mount rw --> HDD
     J1 -- bind mount rw --> HDD; MOc -- bind mount rw --> HDD
-    WEc -. "docker CLI over host socket<br/>(design decision D-13 proposed, §6.2)" .-> J1
+    WEc -. "spawn channel = OPEN QUESTION OQ-5 (§17.1):<br/>socket mount vs sidecar vs host unit" .-> J1
 ```
 *Diagram 3 — deployment boundaries. The job-spawn channel is a tracked open design item
 (OQ-5 §17 / §6.2): mounting `docker.sock` is the known-simple path but grants container
@@ -398,7 +407,7 @@ proven by ledger.
   Decision needed at M0 — §17 OQ-5), `runner.py` (~200 LOC: read `workflows/<flow>/state.json`
   → claim next ticket → exec step → write-ahead per D-05), `promote.py` (boto3 client →
   MinIO, gated by FR-29 rule), `ledger.py` (append + git push + local-commit queue when
-  remote unreachable, A3).
+  remote unreachable, A13).
 - **Job-type registry (not a separate service):** table `job_types(tool, image_digest,
   entry, cpu_class|gpu_class, limits…)` — the extensibility point NFR-20; new tool = row +
   image + compose service entry, zero core edits (T-14 proves at M1).
@@ -578,7 +587,7 @@ and the p95 latency budget honest (NFR-04).
   stdout/stderr tail (64 KiB) become artifact rows. **spawn channel = OQ-5.**
 - **engine → MinIO:** boto3 (S3 API, in-net `minio:9000`), put+versioning, creds env-only.
 - **engine → git:** `git -c user…commit` + `push` on heat-data mirror; remote failure = local
-  queue + retry each loop tick (A3).
+  queue + retry each loop tick (A13).
 - **agent ↔ everything else:** §7.2 + filesystem. Legacy D-ledger import (D-06/T-10): file-
   system read of frozen PD-toolstack evidence (git clone), one-shot importer inside engine —
   no runtime dependency on the frozen repo (it stays source-of-information only [U ruling]).
@@ -679,7 +688,7 @@ as evidence.
 | Hot | `heat-data/runs/<id>/` (ext4 [V]) | state.json, journal, work, artifacts + manifest.json (sha256s) | **canonical** | job containers + engine | host-dir backup (`/home/steven/HE-toolstack/` convention) |
 | Registry | `heat-data/stack.db` (SQLite WAL) | queue, candidates, evidence links, job_types, idempotency | canonical-but-rebuildable (derivable from tier-1+ledger) | engine | same dir |
 | Cold evidence | MinIO `he-promoted` (volume under heat-data) | gate-passed manifests' files, versioned | immutable copy | promote worker | MinIO versioning + host-dir backup |
-| Git evidence | repo `workflows/` + ledger + docs | narrative state, decisions, done-checks | canonical for *process* | engine + agent (ticket files) | GitHub remote (A3) |
+| Git evidence | repo `workflows/` + ledger + docs | narrative state, decisions, done-checks | canonical for *process* | engine + agent (ticket files) | GitHub remote (A13) |
 | Scratch | agent container dirs | anything | **non-authoritative by definition** → deletion always safe | agent | none (by design) |
 
 ### 9.2 Canonical layout (normative directory contract — NFR-14/T-02 readable without logs)
@@ -821,9 +830,12 @@ env-injected.
 | `DISK_WARN_PCT` / `DISK_HARD_PCT` | `80` / `95` [proposal] | engine | FM-6 watermark |
 | `MINIO_BUCKET` / endpoint | `he-promoted` / `http://minio:9000` | promote | in-net |
 | `MINIO_CONSOLE_BIND` | `127.0.0.1` [proposal] | compose | operator UI posture |
-| `LEDGER_REMOTE` | `origin/main` | engine | A3 queue-on-failure |
-### 11.5 (numbering preserved — see note*) Sections 11.5/11.6 order per standards =
-environments, build, topology, config layering, parameters, ops; deployed order here:
+| `LEDGER_REMOTE` | `origin/main` | engine | A13 queue-on-failure |
+### 11.5 Build, deploy, rollback, migration sequence
+*(Standards list build before topology in §11's enumeration; this document's subsection numbering follows the on-page
+order 11.1 envs → 11.2 prereqs → 11.3 topology → 11.4 config layering → 11.5 build/deploy →
+11.6 parameters → 11.7 monitoring → 11.8 runbooks → 11.9 external systems, so cross-refs
+resolve by content, not by the standards' flat list order.)*
 **Build:** host seed script builds 6+ images from `images/*/Dockerfile` (one capability per
 Dockerfile — D-10) → writes `docs/MANIFEST` digests → compose `build:` only for the 2 new
 thin services. **Deploy:** `git pull && make preflight && make up` (one command; T-13 on
@@ -853,7 +865,7 @@ prohibition: no step a fresh session can't run blind)
   (profile `gpu`); expected *normal* state until C6 — do not "fix" by toggling flag (FR-18
   ruling).
 - **R-4 restore:** fresh host dirs from nightly rsync → `make up` → T-11 drill: pull one
-  promoted object by versionId, digest-compare → run M0 slice (§11.5 smoke proves it).
+  promoted object by versionId, digest-compare → run M0 slice (§11.5 deploy smoke).
 - **R-5 spawn channel broken (OQ-5 dependent):** sidecar restart (`make up workflow-engine`
   scoped) → verify via `make test-smoke` → if docker.sock class issue: host docker service
   check (host action — documented as out-of-stack).
@@ -878,7 +890,7 @@ prohibition: no step a fresh session can't run blind)
 | FM-6 | heat-data disk full | med (1 TB shared disk [V]) | all runs stall | disk watermark refuse + ALERTS.md | engine refuses new (protects *in-flight*), R-7 archive path | operator archive; verified by run re-flow | M2 fault-inject |
 | FM-7 | MinIO down at promote time | low-med | evidence degraded, physics fine | `degraded-evidence` state | promote decoupled (§6.5), auto-retry | R-6; backlog flushes when up | T-11 variant |
 | FM-8 | torn state.json | designed-out [P-claim] | session misreads state | N/A (atomic rename) | rename-on-write + digest in ledger | — | T-07 write-window kill |
-| FM-9 | git remote unreachable | real precedent [E Stage-E friction] | ledger local-only | push-retry counter in logs | local queue + retry (A3); process continues | push drains on restore | contract-test w/ mock remote [proposal] |
+| FM-9 | git remote unreachable | real precedent [E Stage-E friction] | ledger local-only | push-retry counter in logs | local queue + retry (A13); process continues | push drains on restore | contract-test w/ mock remote [proposal] |
 | FM-10 | image digests drift from MANIFEST | low | wrong-bits physics | admission refuses (`409 digest_unpinned`) + CI | pull_policy never; seed is the writer | re-seed / MANIFEST update via ADR-shaped review | T-16 |
 ### 12.2 Backups & restore
 Backup = host-dir rsync (nightly, second disk) + git remote; **RPO:** ≤24 h for hot tier
@@ -994,7 +1006,7 @@ pass, digests match E-ledger values [E]) + **T-07** crash-matrix pass (required 
 artifact, D-02 honesty condition) + **T-13** zero-orphan + **OR-01 timing recorded** (<10 min
 target — measured, reported, not claimed). *Cleanup:* scratch dirs pruned, no stray
 containers/images post-suite, `make down` clean. *Exit gate:* all above green + fresh-session
-resume smoke (mini-T-02). ~[no date claim — sequencing: after OQ-5 + D-07/D-13 sign-off].
+resume smoke (mini-T-02). [no date claim — sequencing: after OQ-1/OQ-4 sign-off and OQ-5 resolution].
 
 **M1 — breadth: 6 tool classes + registry.** *Adds:* openfoam-esi/gmsh/calculix/agentcad job
 types, registry + gate-verification triggers, sweep comparison queries, candidate A/B
@@ -1027,7 +1039,8 @@ verified before any M3 planning session, same discipline as C6.
 |----|----------|----------------|---------|------|
 | OQ-2 | GPU VRAM ceiling/floor final values (D-04 defaults 8/5.5 GiB) + C6 re-measure ticket execution | gates `GPU_CLASS_ENABLED`; numbers are safety margins for co-resident LLM services | operator (Steven) w/ measured nvidia-smi data | before GPU profile activates; **not** blocking M0–M2 (FR-19) |
 | OQ-3 | PD-toolstack D-ledger historical import: which candidate rows are worth mining into the registry? | free provenance for sweeps vs migrating attempt-1 cruft | operator + agent triage pass | during M1 (registry live) |
-| OQ-4 | MinIO Chainguard-hardened rebuild (A11 open ticket [E]) — do it at seed-script authoring or leave digest-pinned OSS image? | supply-chain posture of the evidence tier | operator | before promote is load-bearing (M1) |
+| OQ-4 | physics-gate endpoint wrapper (D-06) + registry/SQLite colocation (D-08) acceptance. | M0 design freeze | reviewer | design freeze |
+| OR-05 | MinIO Chainguard-hardened rebuild (open ticket [E]) — rebuild at seed-script authoring or leave digest-pinned OSS image? | supply-chain posture of the evidence tier | operator | before promote is load-bearing (M1) |
 | OQ-5 | **Job spawn channel** (§6.2): docker.sock mount vs scoped sidecar vs host-unit engine | decides the security-critical component; docker.sock = escape-class power in a container | operator (security posture call) | **M0 blocker** (runner can't spawn without it) |
 | OQ-6 | toolserver shares SQLite WAL vs engine-internal HTTP (§7.5) | coupling vs one-less-hop; both defensible | reviewer at formal review (§18) | design freeze |
 ### 17.2 Risk register (top 5, owner + mitigation + contingency)
@@ -1056,7 +1069,7 @@ open questions **surfaced not hidden** (OQ-2…6). **Gaps acknowledged honestly:
 numbers are targets + measurement plans, none measured (stack not yet built — saying so *is*
 the honesty requirement met); T-08/T-09 will revise §13.1 assumptions [U]; diagrams 1–8 are
 design views, matching the §6/§8 text they annotate. **External input needed:** OQ-5 (blocker),
-D-07/D-13 sign-off, OQ-2/OQ-4 timing (non-blocking), reviewer call on OQ-6. **Verdict
+OQ-1/OQ-4 sign-off, OQ-2 timing (non-blocking), reviewer call on OQ-6. **Verdict
 (proposed):** *approve with exceptions* — condition: OQ-5 resolved before M0 build starts;
 nothing else found that changes structure.
 
@@ -1148,5 +1161,5 @@ Every §6 component states its code lineage ([existing]/[P]/[asset]) — C1-clas
 structurally visible. Numbered cross-refs used: FR/NFR/T/OR (REQUIREMENTS v1.0), D/X/F/OQ
 (ADR v1.0), C/G (PHASE1), FM/R (this doc §11–12), D1…D14 (attempt-1 ledger evidence IDs).
 No performance number appears without [V]/[E]/[proposal] tag. Diagrams 8/8. Sections 19/19
-(§11.5/11.6 order note preserved at §11.6). Unverified: every pinned-version "at first build"
+(§11.5 numbering note). Unverified: every pinned-version "at first build"
 row (§15) and OR-01 timing — both *deliberately* empty rather than guessed.

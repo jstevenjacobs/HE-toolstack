@@ -279,3 +279,5 @@ Decision provenance classes, stated up front because reviewers must be able to a
 | OQ-2 | Confirm/adjust D-04 numbers (8/5.5 GiB) at review with C6 re-measure data in hand. | GPU-class enablement |
 | OQ-3 | Migration stance detail: PD-toolstack evidence repos stay frozen (user ruling says source-of-information only — confirm *read-only mirror* vs *do-not-touch* for the copy-into-registry step, ticket C3). | C3 execution |
 | OQ-4 | physics-gate endpoint wrapper (D-06) and registry/SQLite colocation (D-08) acceptance. | M0 design freeze |
+| OQ-5 | Job spawn channel: docker.sock mount vs scoped sidecar vs host-unit engine (TECHNICAL-DESIGN §6.2/§17.1). Security-critical; **M0 blocker**. | M0 build start |
+| OQ-6 | toolserver shares engine's SQLite WAL vs engine-internal HTTP (TECHNICAL-DESIGN §7.5). Coupling vs one-less-hop; reviewer call. | design freeze |
