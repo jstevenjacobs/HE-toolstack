@@ -199,9 +199,6 @@ URL. Auth deferred behind this boundary and documented as deferred (tech design 
 | NFR-08 | Containers run non-root where upstream allows (calculix already proven [E]); any root container is an explicit, logged exception with reason. | P1 | [E] | T-15 | compose audit lists user per service; exceptions carry reason strings |
 | NFR-09 | Image provenance: only digests in the repo `MANIFEST` run (`pull_policy: never`); a digest outside MANIFEST is refused by the dispatcher. | P0 | [E resolve.py/MANIFEST discipline; A6 no registry] | T-16 | Submit job with foreign digest ⇒ refused with named check |
 
-| T-17 | Agent-container connectivity probe (FINDING-01; runs **from inside** a container like the agent's, host-side curl does not count) | e2e network | NFR-07, FR-01 |
-| T-18 | Backup consistency + OneDrive-offline staleness alarm (sqlite `.backup` product integrity; `backup_stale` escalates) | drill | NFR-22 |
-| T-19 | Daemon-restart reconciliation drill RC-3 (restart dockerd mid-job → re-adopt/re-queue per §8.6, gapless ledger) | drill | NFR-24, §12.5 RC-3 |
 ### 3.5 Maintainability
 
 | ID | Description | Pri | Rationale / refs | Verification | Acceptance criteria |
@@ -270,6 +267,9 @@ URL. Auth deferred behind this boundary and documented as deferred (tech design 
 | T-14 | Worker-seam + extensibility exercises (add-solver-path review, second worker identity) | architecture test | NFR-05/20 |
 | T-15 | Boundary tests (loopback-only scan, non-root audit, healthz/logs JSON) | security/ops | NFR-07/08/13 |
 | T-16 | Digest admission + MANIFEST CI check | security/supply-chain | FR-16 mechanism, NFR-09/11 |
+| T-17 | Agent-container connectivity probe (FINDING-01; runs **from inside** a container like the agent's, host-side curl does not count) | e2e network | NFR-07, FR-01 |
+| T-18 | Backup consistency + OneDrive-offline staleness alarm (sqlite `.backup` product integrity; `backup_stale` escalates) | drill | NFR-22 |
+| T-19 | Daemon-restart reconciliation drill RC-3 (restart dockerd mid-job → re-adopt/re-queue per §8.6, gapless ledger) | drill | NFR-24, §12.5 RC-3 |
 
 ## 5. Requirements traceability matrix (requirement → components → tests)
 
@@ -291,6 +291,7 @@ MO=minio, REG=registry(SQLite-in-WE), HEA=he-client, HD=heat-data(host dir), IM=
 | FR-35…38 | WE, HD | T-01, T-02, T-05, T-07 |
 | FR-39…40 | HEA, HD, TS | T-08, T-02, T-12 |
 | FR-41…42 | *(M3+ — excluded from initial-release matrix)* | — |
+| T-17…19 (finding-response tests; reqs themselves rowed above) | NFR-07, NFR-22, NFR-24 | T-17, T-18, T-19 |
 | NFR-01…02 | OPS, WE | T-13, T-05 |
 | NFR-03…04 | WE, TS, host | T-01, T-09 |
 | NFR-05 | WE(worker seam) | T-14 |

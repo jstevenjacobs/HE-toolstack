@@ -403,7 +403,7 @@ marked Proposed pending the independent review.
     (any image, any mount incl. `/`, privileged, escape). Auditability: daemon logs only, no
     semantic log. Enforceability: none at the caller.
   - **B. Dedicated spawn-sidecar holding the socket; engine calls a 4-method HTTP API
-    (`create_run`, `kill`, `inspect`, `reap`) over the `he-internal` network.** Honest framing
+    (`create_run`, `status`, `kill`, `logs`) over the `he-internal` network.** Honest framing
     (per the review's warning): **this is privilege redistribution, not elimination** — a
     compromised sidecar is still root-equivalent on the host. What genuinely shrinks: the
     attack surface reachable from the two containers that execute untrusted user code and

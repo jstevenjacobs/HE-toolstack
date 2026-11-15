@@ -367,7 +367,7 @@ toolserver (NFR-07, T-15); external egress is git-over-HTTPS and nothing else in
 |----------|-----------|------------------------|-------------------------|
 | agent → toolserver | `127.0.0.1` published bind + gateway-IP client URL (§6.4, D-15); no other listener | none (no HTTP auth, loopback = control, §10.2) | can submit/inspect jobs as operator — same trust class as operator shell |
 | toolserver → engine | compose-internal network, service DNS (§7.5) | none | engine is same trust class (both operator-owned code) |
-| engine → Docker daemon | **pending OQ-5**: sidecar holds the socket, engine talks narrow HTTP (§6.2, D-16) | sidecar exposes ONLY `run/status/kill/logs` for digest-pinned images | with sidecar: one container's lifecycle; with raw socket (rejected option): full host root |
+| engine → Docker daemon | **pending OQ-5**: sidecar holds the socket, engine talks narrow HTTP (§6.2, D-16) | sidecar exposes ONLY `create_run`/`status`/`kill`/`logs` for digest-pinned images | with sidecar: one container's lifecycle; with raw socket (rejected option): full host root |
 | solver container | `--user`, `--pids-limit`, mem/cpu caps, single bind `jobs/<id>/` rw (§6.2), `--network none` for batch phases | none — inputs arrive pre-staged on its bind; no token in env | only its own job dir |
 | MinIO credentials | root creds compose-env (operator-only ports `127.0.0.1:9000` [V §11.3]); service account per-writer bucket prefix [P] | engine holds promote-scoped service key, toolserver none | evidence bucket (delete-able tier, not authority) |
 | Git credentials | host-side only — ledger push runs via host git askpass [E proven PD pattern]; **no git creds inside any container** [V: current PD-toolstack push is host/session-side] | n/a into containers | cannot be leaked by a container compromise |
@@ -441,7 +441,9 @@ docker-proxy to forward; host-side exposure is what stays loopback-only via the 
   `worker_docker.py` (**the Worker seam**: `Worker.spawn(job_spec)->handle`; v1.1 per
   FINDING-03: engine never sees a Docker socket under any option. Option B (recommended,
   **operator decision pending**, ADR-D-16/§13.1): engine calls the `spawn-sidecar` HTTP API
-  (`POST /spawn`, `POST /{id}/kill`, `GET /{id}`, `POST /reap`) over `he-internal` net;
+  (`POST /spawn`, `GET /{id}/status`, `POST /{id}/kill`, `GET /{id}/logs` — the four
+  methods of ADR-D-16) over `he-internal` net; expired-container reclamation is
+  the sidecar's own janitor timer, not an engine-facing method;
   sidecar exclusively holds `/var/run/docker.sock` and **server-side** enforces the spawn
   contract (digest allow-list §11.2, `network=none`, cap-drop/non-root, cpuset+mem ceilings
   §6.8, bind paths ⊂ `{he-scratch, job-scratch, run inputs}` only) + semantic audit row per
@@ -1232,7 +1234,7 @@ cache-invalidation surface exists.
 
 ## 14. Alternatives Considered
 
-Full evidence lives in `HE-TOOLSTACK-ADR.md` (12 ADRs incl. rejected options D-02/D-03/D-05/
+Full evidence lives in `HE-TOOLSTACK-ADR.md` (18 records incl. rejected options D-02/D-03/D-05/
 D-08/D-09/D-10/D-12/X-1…X-8 with rejection reasons). The five architecture-level ones:
 **D-01 single compose vs split infra** — split re-created the C4 orphan exactly as observed;
 rejected. **D-02 files-first engine vs LangGraph/Temporal** — durable-exec platform cost on

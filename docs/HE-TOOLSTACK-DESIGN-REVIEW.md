@@ -1,6 +1,7 @@
 # HE-toolstack Architecture Design Review — Checklist & Findings
 
-**Document:** `HE-TOOLSTACK-DESIGN-REVIEW.md` · v1.0 · 2026-11-14
+**Document:** `HE-TOOLSTACK-DESIGN-REVIEW.md` · v1.1 (rev 2026-11-15: re-gated against
+the FINDING-01…08 revision set; see §8 status column) · 2026-11-14
 **Purpose:** the review instrument required by DesignStandards §8-D. Reviewers work this
 checklist top-to-bottom against `HE-TOOLSTACK-TECHNICAL-DESIGN.md` (TD),
 `HE-TOOLSTACK-ADR.md` (ADR), and `HE-TOOLSTACK-REQUIREMENTS.md` (REQ). Each item is
@@ -10,7 +11,8 @@ self-review]** — that is a *first pass, not a substitute for independent revie
 marked 🧑 need a human reviewer.
 
 Reviewed baseline: TD @ commit `4c887f8` (v1.0), REQ @ `0ed664b` (v1.0), ADR @ `f44c294`
-(v1.0 incl. OQ-5/OQ-6). Phase 1 evidence: `PHASE1-ARCHITECTURE-DISCOVERY.md` @ `141249d`.
+(v1.0 incl. OQ-5/OQ-6). **v1.1 re-gate baseline: TD v1.2 + REQ v1.3 (branch
+`review/architecture-revisions`, batches 1–2 of the formal-review response).** Phase 1 evidence: `PHASE1-ARCHITECTURE-DISCOVERY.md` @ `141249d`.
 
 ---
 
@@ -31,7 +33,7 @@ Reviewed baseline: TD @ commit `4c887f8` (v1.0), REQ @ `0ed664b` (v1.0), ADR @ `
 | 11 | 11 Infrastructure & Deployment (compose, preflight, runbooks) | ✅ | TD §11.1–11.9 |
 | 12 | 12 Reliability / Failure management (13 modes + FMEA) | ✅ | TD §12 (FM-1..FM-10) + Diagram 8 |
 | 13 | 13 Performance & Scalability (honest targets, no invented numbers) | ✅ | TD §13 ([U] on every estimate) |
-| 14 | 14 Testing & Verification Strategy (10 levels, physics-gate preserved) | ✅ | TD §14 (T-01..T-16 defined in REQ §4) |
+| 14 | 14 Testing & Verification Strategy (10 levels, physics-gate preserved) | ✅ | TD §14 (T-01..T-19 defined in REQ §4) |
 | 15 | 15 (cross-cutting: performance above/below line, limits) | ✅ | TD §15 limits & exit criteria |
 | 16 | 16 Implementation & Migration Plan (M0–M4, vertical slices) | ✅ | TD §16 (exit gates = T-ids) |
 | 17 | 17 Architecture Decisions & Open Issues | ✅ | TD §17 + ADR (12 D + X/F/OQ) |
@@ -46,7 +48,7 @@ Reviewed baseline: TD @ commit `4c887f8` (v1.0), REQ @ `0ed664b` (v1.0), ADR @ `
 | # | Check | Status |
 |---|-------|--------|
 | D1 | 8 required diagram types present (context, logical, deployment, network, data-flow, state-machine, e2e sequence, failure sequence) | ✅ [author self-review] |
-| D2 | **Syntactically valid** — `mermaid.parse()` (mermaid 11 + jsdom, node 26.5): 8/8 blocks pass | ✅ [V — measured 2026-11-14; the pass found+fixed a real defect: stray `</div>` + unquoted-paren labels in Diagram 1] |
+| D2 | **Syntactically valid** — `mermaid.parse()` (mermaid 11 + jsdom, node 26.5): 9/9 blocks pass (9 diagrams incl. new D9 lifecycle, re-validated 2026-11-15) | ✅ [V — measured 2026-11-14; the pass found+fixed a real defect: stray `</div>` + unquoted-paren labels in Diagram 1] |
 | D3 | Boundaries distinguish container / host / external / storage | ✅ Diagrams 1, 3 (subgraphs = lifecycle boundaries) |
 | D4 | Communication direction + protocol shown | ✅ Diagrams 1, 4 (edge labels: HTTP/JSON, docker run, boto3, git) |
 | D5 | Consistent naming with prose (§6 component names == diagram node ids) | 🧑 reviewer item |
@@ -73,7 +75,7 @@ deployment/maintenance, limits/risks).
 
 | # | Check | Status |
 |---|-------|--------|
-| A1 | Every D-nn ADR has: ID, title, status, context, alternatives, evaluation criteria, decision, rationale, consequences, risks, revisit conditions, references | ✅ [author self-review — 12 ADRs follow the template] |
+| A1 | Every D-nn ADR has: ID, title, status, context, alternatives, evaluation criteria, decision, rationale, consequences, risks, revisit conditions, references | ✅ [author self-review — 18 ADR records follow the template] |
 | A2 | Alternatives genuinely evaluated (not strawmen); rejections visible (X-nn section) | ✅ 8 rejected alternatives recorded |
 | A3 | Uncertainty separated from fact: evidence tags [V]/[E]/[P]/[U] used; no untagged performance number | ✅ grep-verified (TD §19 self-check) |
 | A4 | Decisions from *the user* (D-04=B, D-05=1, D-10=separate) represented verbatim-ruled, not silently reinterpreted | 🧑 reviewer to confirm against Phase 1 register |
@@ -127,7 +129,7 @@ Reviewers append FINDING-nn rows.
 |----|-----|---------|-------------|
 | FINDING-01 | medium | Spawn-channel security decision was at risk of being hand-waved in early drafts; leaving it open inside prose would violate DesignStandards §6.4 | RESOLVED (surfaced): OQ-5 is now an explicit M0 blocker in TD §6.2/§17 + ADR, with 3 enumerated options (socket mount / sidecar / host unit) |
 | FINDING-02 | medium | TD draft created a private A-id namespace colliding with Phase 1 canonical assumptions | FIXED @f44c294 (unified to Phase 1 register + A13–A15) |
-| FINDING-03 | low | Diagram 1 contained invalid mermaid (stray `</div>`, unquoted-paren labels) — would have failed review rendering | FIXED @4c887f8; validated 8/8 blocks with real parser (mermaid 11 + jsdom, node 26.5) [V] |
+| FINDING-03 | low | Diagram 1 contained invalid mermaid (stray `</div>`, unquoted-paren labels) — would have failed review rendering | FIXED @4c887f8 (v1.0); re-validated on v1.2 tree; validated 9/9 blocks with real parser (mermaid 11 + jsdom, node 26.5) [V] |
 | FINDING-04 | open | GPU-class numbers (8 GiB ceiling / 5.5 GiB floor) rest on one C6 measurement chain; driver floor ≥591.59 claim unconfirmed (nvidia-smi over SSH returned no rows) | OPEN — re-measure ticket owed (OQ-2 is the gate); FR-19 insulates M0–M2 from GPU |
 | FINDING-05 | open | `make down`/preflight/runbooks/MANIFEST exist only as *design*; none executed against a built stack (stack not built — per Phase 1 law) | OPEN by nature — M0 acceptance converts them to [V]; reviewers must NOT accept M0 claims today |
 | FINDING-06 | open | Attempt-1 reuse list (TD §4) claims several scripts reusable "unchanged" based on Phase 1 reading; each needs an import-time smoke check at M0 import | OPEN — tracked as M0 activity with evidence requirement |
