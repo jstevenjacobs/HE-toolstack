@@ -210,21 +210,21 @@ CoolProp are in-image dependencies; GitHub is the evidence remote outside the bo
 graph TB
     subgraph Host["Host JSJ-Office (WSL2, RTX 5060 Ti, /dev/sdf 1TB ext4)"]
         subgraph Stack["HE-toolstack compose project (one lifecycle)"]
-            TS[toolserver :8100 loopback]
+            TS["toolserver :8100 loopback"]
             WE[workflow-engine<br/>queue+registry+runner]
             MO[minio :9000/:9001]
             JOB[per-job tool containers<br/>openfoam-esi / ta-solver-runtime /<br/>gmsh / calculix / agentcad / property-pipeline]
-        </div>
+        end
         HD[("heat-data host dir<br/>/home/steven/HE-toolstack/heat-data<br/>state+artifacts — D-05")]
-        AG[agent / Hermes container<br/>(he client)]
-        EMB[Ollama embeddings<br/>:11434 — co-resident, protected]
+        AG["agent / Hermes container<br/>(he client)"]
+        EMB["Ollama embeddings<br/>:11434 — co-resident, protected"]
         TS --- HD; WE --- HD; JOB --- HD
         AG -- "HTTP/JSON 127.0.0.1:8100" --> TS
         TS --> WE; WE -- "docker run (host engine)" --> JOB
         WE -- "promote (boto3)" --> MO
         JOB -- "nvidia runtime, flag-gated (C6)" --> GPU[(RTX 5060 Ti<br/>1 concurrent GPU job, ≤8 GiB)]
     end
-    AGX[sglang LLM gx10-9d06<br/>192.168.1.102:8000 ARM64 — NOT compute (D-11)]
+    AGX["sglang LLM gx10-9d06<br/>192.168.1.102:8000 ARM64 — NOT compute (D-11)"]
     AG -. "OpenAI-compatible inference (agent side only)" .-> AGX
     Stack -. "ledger git push" .-> GH[(GitHub jstevenjacobs/HE-toolstack)]
 ```

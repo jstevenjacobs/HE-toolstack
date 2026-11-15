@@ -1,9 +1,14 @@
 {
   "project": "HE-toolstack Phase 2 - Documentation production",
   "phase": 2,
-  "cursor": "P2.1",
-  "completed": ["P2.0"],
-  "tickets_open": ["P2.1", "P2.2", "P2.3", "P2.4", "P2.5"],
-  "updated": "2026-11-14T15:50:00-06:00",
+  "cursor": "P2.4",
+  "completed": ["P2.0", "P2.1", "P2.2", "P2.3"],
+  "tickets_open": ["P2.4", "P2.5"],
+  "updated": "2026-11-14T17:30:00-06:00",
+  "done_checks": {
+    "P2.1": "63 req IDs each w/ verification method + acceptance criteria; matrix refs all resolve; committed+pushed @0ed664b",
+    "P2.2": "every Phase 1 ruling D-01..D-12 has an ADR w/ options+consequences+evidence tags; rejected/deferred/unresolved sections; committed+pushed @517e39d",
+    "P2.3": "19/19 sections, 8/8 mermaid diagrams, 0 dangling IDs across TD/REQ/ADR, fences balanced; internal-consistency QA pass @f44c294"
+  },
   "notes": "Phase 1 gate cleared at 141249d (D-04=B, D-05=1, D-10=separate all Accepted). P2.0 = ticket registration (this file's creation). Deliverable order follows dependency: REQUIREMENTS -> ADR -> TECHNICAL-DESIGN -> DESIGN-REVIEW -> QA report. Each ticket: <=3-line done-check verified same session, ledger row with ref: per non-trivial decision."
 }
