@@ -1,6 +1,6 @@
 # HE-toolstack Requirements Baseline
 
-**Document:** `HE-TOOLSTACK-REQUIREMENTS.md` · v1.0 · 2026-11-14
+**Document:** `HE-TOOLSTACK-REQUIREMENTS.md` · v1.1 (rev 2026-11-15: +NFR-22 backup root per ruling D-14) · 2026-11-14
 **Status:** Baseline for review (Phase 2 deliverable C of DesignStandards §8)
 **Upstream sources:** Phase 1 report (`docs/PHASE1-ARCHITECTURE-DISCOVERY.md`, commit `141249d`)
 §2–§5; PD-toolstack `STACK-DESIGN-v3.md` (v3.8.1) and `STACK-AS-BUILT.md` (D-ledger D1–D27);
@@ -229,6 +229,7 @@ existing solver images.
 |----|-------------|-----|------------------|--------------|---------------------|
 | NFR-18 | Cold-session resume ≤ 10 min wall incl. harness (FR-36); state is never *only* in agent context. | P0 | [V A12] | T-02 | Timed cold-session run in ledger |
 | NFR-19 | Documented host-reboot recovery: compose `restart: unless-stopped` brings stack back; in-flight jobs resolved per FR-37 matrix with zero manual repair. | P1 | [P] | T-05 | Reboot drill logged at M1 |
+| NFR-22 | Canonical backup root: **all backups** of authoritative stack state land under `/mnt/c/Users/steven/OneDrive/Backup/HE-toolstack/` (Windows path; WSL-visible from the agent container; OneDrive-managed). Layout: `heat-data/` (nightly mirror), `repo/` (git bundle of ledger/state/workflows), `drills/` (T-11 evidence). No other backup destination is authoritative; restore reads the same path. | P0 | [V user ruling 2026-11-15; path verified on host, `HE-toolstack/` subdir exists] | T-11 | Backup job writes only under `BACKUP_ROOT`; T-11 drill restores from it via WSL and digests match; OneDrive reports the items as synced |
 
 ### 3.10 Extensibility
 
@@ -289,6 +290,7 @@ MO=minio, REG=registry(SQLite-in-WE), HEA=he-client, HD=heat-data(host dir), IM=
 | NFR-15 | OPS(repo+.env+seed) | T-13 |
 | NFR-16…17 | HD, MO, REG | T-04, T-11 |
 | NFR-18…19 | HD, WE, OPS | T-02, T-05 |
+| NFR-22 | OPS, HD | T-11 |
 | NFR-20…21 | IM, WE, TS(core) | T-14, T-06 |
 
 No requirement is unmapped; no component appears without at least one requirement

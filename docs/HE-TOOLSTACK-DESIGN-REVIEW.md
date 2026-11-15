@@ -114,7 +114,7 @@ deployment/maintenance, limits/risks).
 | O3 | Runbooks exist w/ symptom→verify→act→verify (R-1..R-7) | ✅ (drill = T-07; never yet executed — honestly [proposal]) |
 | O4 | Migration: PD-toolstack artifacts frozen as evidence source; D-ledger import = triaged (OQ-3), no silent re-adoption | ✅ |
 | O5 | Rollback plan real: append-frozen images + git revert + make up | ✅ |
-| O6 | Disk/watermark/backups addressed w/ numbers (80/95%, 3-2-1-lite stance) | ✅ |
+| O6 | Disk/watermark/backups addressed w/ numbers (80/95%, canonical backup root D-14, R-8 stale-backup guard) | ✅ |
 
 ---
 

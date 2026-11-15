@@ -169,6 +169,7 @@ Initial release = Milestones M0–M2 (vertical slice + engine breadth + fleet). 
 | D-10 | Image consolidation: **no consolidation — keep the 6 verified images separate; narrow-scope images rule going forward.** User ruling: "more images with more narrowly defined scopes will be more maintainable as the established toolstack needs to be adapted in the future." Supersedes DESIGN-v2 §2.3's "consolidate to 4" and my Option-2 proposal (fold CoolProp into toolserver image). New-tool rule: new capability = new narrow image, never additions to existing solver images. | **Accepted** (user ruling 2026-11-14) | User rationale (future adaptability); supports D8/D13/D14 build-isolation lessons + resolve.py blast-radius argument |
 | D-11 | gpu1 excluded from compute tier (ARM64 + LLM duty) | Proposed | 1.3 [V] |
 | D-12 | Physics core (TaSMET fork, dataset, gate, evidence) migrates as-is; patches 0004-equivalent is M0 scope | Accepted (direction) | E/E2b evidence [E] |
+| D-14 | Canonical backup root: all backups under `/mnt/c/Users/steven/OneDrive/Backup/HE-toolstack/` (see ADR-D-14) | Accepted (user ruling 2026-11-15) | owner ruling [V]; path verified on host |
 
 ---
 

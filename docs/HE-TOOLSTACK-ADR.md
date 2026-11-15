@@ -1,6 +1,6 @@
 # HE-toolstack Architecture Decision Register (ADR)
 
-**Document:** `HE-TOOLSTACK-ADR.md` · v1.0 · 2026-11-14
+**Document:** `HE-TOOLSTACK-ADR.md` · v1.1 (rev 2026-11-15: +ADR-D-14 backup root, user ruling) · 2026-11-14
 **Status:** Living register (Phase 2 deliverable B of DesignStandards §8). Updates are ledger-
 backed commits; superseded ADRs stay visible with status `Superseded by …`.
 **Companion:** `HE-TOOLSTACK-TECHNICAL-DESIGN.md` §17 summarizes this register; requirement
@@ -146,7 +146,8 @@ Decision provenance classes, stated up front because reviewers must be able to a
   documented workaround; user cleanup observation becomes enforceable (scratch deletion is
   *defined* safe).
 - **Consequences:** compose carries bind mounts + uid config; promote path to MinIO is
-  explicit (FR-29: gate-passed + ledger + dataset tier only); backup = heat-data + git.
+  explicit (FR-29: gate-passed + ledger + dataset tier only); backup = heat-data + git,
+  destination fixed by D-14 (canonical backup root).
 - **Risks:** host-dir discipline drift (manual edits) — mitigated by manifest digest checks
   (NFR-16); single disk is SPOF (risk register R-07; versioned MinIO tier is the copy).
 - **Revisit when:** state outgrows one disk, or multi-host workers force a shared FS
@@ -259,7 +260,35 @@ Decision provenance classes, stated up front because reviewers must be able to a
 | X-5 | MinIO as hot solver store | D-05 | network hop in hot path; wrong shape for step files |
 | X-6 | Named docker volumes for state | D-05 | hides data from the cold-session contract (`ls`/`jq`) |
 | X-7 | gpu1 as compute worker | D-11 | ARM64 vs amd64 images + LLM duty |
-| X-8 | /mnt/c (Windows FS) for solver I/O | inherited (D9) | measured 28–39× penalty [E] |
+| X-8 | /mnt/c (Windows FS) for solver I/O | inherited (D9) | measured 28–39× penalty [E]. Scope note: applies to **hot solver paths only** — cold backup copies to OneDrive (/mnt/c) are ruled separately and accepted (D-14). |
+
+### ADR-D-14 — Canonical backup root = `/mnt/c/Users/steven/OneDrive/Backup/HE-toolstack/`
+- **Status:** **Accepted — user ruling, 2026-11-15** ("the design needs to specify … as the root
+  directory for all backups")
+- **Context:** D-05 makes one host dir (`heat-data`) the single authoritative state owner; D-01 keeps
+  MinIO's volume inside it, so backup = one directory tree + the git ledger. TD §9.4 had left the
+  destination as the previous project's convention (`/home/steven/backups`, second disk). The owner
+  ruled the destination explicitly instead: OneDrive's Backup folder, HE-toolstack subfolder.
+- **Ruling (verbatim rule):** every backup artifact of the stack — heat-data mirror, git bundle of
+  `workflows/`/ledger, restore-drill evidence — lands **only** under
+  `/mnt/c/Users/steven/OneDrive/Backup/HE-toolstack/`. Layout: `heat-data/`, `repo/`, `drills/`.
+  Restore reads the same root.
+- **Verified fit [V 2026-11-15]:** path exists on the host (`Backup/HE-toolstack/` already present,
+  alongside the frozen `Backup/PD-toolstack/` archive); `/mnt/c` is WSL-visible from both host-WSL
+  and the Hermes agent container; 841 GB free on C:. Attempt-1's *proven* nightly backup cron already
+  targeted the OneDrive root (PHASE1 inventory row 13, restore drill passed) — this rule codifies
+  what demonstrably worked.
+- **Consequences:** `BACKUP_ROOT` env knob (§11.4) is the single source of the path; timer is a host
+  unit, not a compose service (compose stays 100% of stack lifecycle, D-01). OneDrive adds cloud
+  versioning + off-site replication at zero extra tooling; the second local disk becomes optional
+  extra redundancy, never a restore source.
+- **Risks & mitigations:** OneDrive Files-On-Demand placeholders + sync races on a folder rsync
+  writes into ⇒ restore procedure forces full download and verifies sha256 vs registry digests
+  (D8/R-4 already do digest compare); large heat-data churn could fight OneDrive sync — monitor at
+  M1, and if sync proves unreliable the fix is a per-item exclusion or rclone-side copy, decided with
+  evidence, not now. 28–39× /mnt/c I/O penalty (D9) does **not** apply: backups are cold sequential
+  copies off the hot path (X-8 scope note updated).
+- **Traces to:** NFR-22 (new), NFR-17/19, FR-29; TD §6.9 (new component), §9.1/§9.4, §12.2, D8, R-4, R-8 (new runbook row), §11.4 `BACKUP_ROOT`.
 
 ## 3. Deferred decisions (explicitly not made here)
 

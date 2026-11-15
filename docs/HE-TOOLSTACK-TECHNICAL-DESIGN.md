@@ -60,7 +60,7 @@ only Option A always available); hand-rolled runner bugs (crash-matrix T-07 is a
 acceptance artifact); host-disk SPOF (versioned MinIO tier is the copy); phantom-component
 recurrence (every §6 component lists its *existing* code lineage or is marked [P]).
 
-**Readiness.** Architecture is review-ready: requirements baselined (63 IDs, 100%
+**Readiness.** Architecture is review-ready: requirements baselined (64 IDs, 100%
 trace-mapped), 12 ADRs (5 accepted incl. 3 user-rulled, 7 proposed pending sign-off), 4 open
 questions surfaced (OQ-1…4). No milestone's acceptance depends on an unverified premise.
 
@@ -144,7 +144,7 @@ automation (FR-41) — specified only as boundaries, not as promised functionali
 ## 3. Requirements
 
 The normative baseline is `HE-TOOLSTACK-REQUIREMENTS.md` v1.0: **40 functional (FR-01…42,
-two reserved for M3+), 21 non-functional (NFR-01…21), 16 verification tests (T-01…16), 5
+two reserved for M3+), 22 non-functional (NFR-01…22), 16 verification tests (T-01…16), 5
 open requirements (OR-01…05)**. Every row carries ID, description, priority, rationale,
 verification method, acceptance criteria; §5 of that file is the requirement→component→test
 traceability matrix (script-verified 100% mapped, no dangling IDs). DesignStandards §3's
@@ -537,6 +537,32 @@ proven by ledger.
   consequence, FR-16/T-16, NFR-15 reproducibility).
 - **heat-data layout:** normative tree §9.2 + Appendix directory listing.
 
+
+### 6.9 Host backup job  [thin host timer, in-repo `deploy/backup/` [P]; not a compose service]
+- **Problem/necessity:** D-05 makes one host dir authoritative — off-box copies are the only hedge
+  against disk loss, and attempt-1 proved drills are worthless unless they run against the *real*
+  destination. The user ruling of 2026-11-15 (D-14) fixes the destination so drift is impossible.
+- **Destination (canonical, non-negotiable):** `/mnt/c/Users/steven/OneDrive/Backup/HE-toolstack/`
+  — Windows path (OneDrive Backup folder), WSL-visible at the same path from the agent container and
+  from host WSL (verified on host 2026-11-15; `HE-toolstack/` subdir exists). OneDrive gives
+  cloud-side versioning + off-site replication for free.
+- **Layout:** `heat-data/` (nightly rsync mirror of `heat-data/` incl. the MinIO in-dir volume ⇒
+  backup = one dir), `repo/` (nightly `git bundle` of `workflows/` + ledger), `drills/` (T-11
+  restore-drill evidence). **Does not own:** scheduling durability (a host timer, not a service —
+  missed runs are loud: a ledger line + watermarks; compose stays 100% lifecycle per D-01).
+- **Caveats stated openly [V/E]:** writing into a OneDrive folder means Files-On-Demand placeholder
+  files and sync races — restore must force full download (`tree /sync` or `attrib -u`) and verify
+  sha256 vs registry digests (D8 does exactly this); solver I/O on /mnt/c stays prohibited (X-8 —
+  backups are cold sequential copies, not hot solver paths; no contradiction).
+- **Key interfaces:** none in-stack; the *restore path* is R-4 (fresh dirs → `make up` → T-11 digest
+  compare → M0 smoke).
+- **Testing:** T-11 asserts (a) backup timer writes only under `BACKUP_ROOT`, (b) drill restore from
+  that path reproduces digests, (c) OneDrive status reports the items synced (NFR-22 criteria).
+- **Alternatives:** second physical disk only — demoted to *optional* local redundancy [E: previous
+  `/home/steven/backups` practice]; ruled out as canonical because it shares the host's fate.
+  Borg/restic encryption layers — deferred, [proposal] M2: OneDrive versioning covers the near-term
+  risk, add once volumes justify the key-management cost.
+
 ---
 
 ## 7. API and Interface Specifications
@@ -685,9 +711,9 @@ as evidence.
 ### 9.1 Storage tiers and ownership (D-05 applied)
 | Tier | Store | Content | Authority | Writer | Backup |
 |------|-------|---------|-----------|--------|--------|
-| Hot | `heat-data/runs/<id>/` (ext4 [V]) | state.json, journal, work, artifacts + manifest.json (sha256s) | **canonical** | job containers + engine | host-dir backup (`/home/steven/HE-toolstack/` convention) |
+| Hot | `heat-data/runs/<id>/` (ext4 [V]) | state.json, journal, work, artifacts + manifest.json (sha256s) | **canonical** | job containers + engine | nightly mirror → canonical backup root (§6.9, D-14) |
 | Registry | `heat-data/stack.db` (SQLite WAL) | queue, candidates, evidence links, job_types, idempotency | canonical-but-rebuildable (derivable from tier-1+ledger) | engine | same dir |
-| Cold evidence | MinIO `he-promoted` (volume under heat-data) | gate-passed manifests' files, versioned | immutable copy | promote worker | MinIO versioning + host-dir backup |
+| Cold evidence | MinIO `he-promoted` (volume under heat-data) | gate-passed manifests' files, versioned | immutable copy | promote worker | MinIO versioning + nightly mirror (in-dir volume rides along) |
 | Git evidence | repo `workflows/` + ledger + docs | narrative state, decisions, done-checks | canonical for *process* | engine + agent (ticket files) | GitHub remote (A13) |
 | Scratch | agent container dirs | anything | **non-authoritative by definition** → deletion always safe | agent | none (by design) |
 
@@ -728,8 +754,10 @@ Runs: hot tier retained until explicitly archived (disk watermark: engine alerts
 of /dev/sdf, refuses new runs at 95 % — FM-6; deletion is human/operator choice, never
 automatic — physics evidence is the product). Promoted objects: MinIO versioning with
 Keep-Version retention, no auto-expiry [proposal; revisit when >500 GB]. Git: append-only.
-Scratch: 24 h pruning, safe by §9.1 definition. Backup cadence: heat-data nightly rsync to
-second disk (`/home/steven/backups` pattern [E]); RPO = last nightly + git (NFR-19).
+Scratch: 24 h pruning, safe by §9.1 definition. Backup cadence: heat-data nightly mirror to the **canonical backup root**
+`/mnt/c/Users/steven/OneDrive/Backup/HE-toolstack/` (ruling D-14, NFR-22; §6.9 — OneDrive-managed,
+WSL-visible); the legacy second-disk copy (`/home/steven/backups` [E]) is optional extra local
+redundancy, never a restore source. RPO = last nightly + git (NFR-19).
 
 ### 9.5 Versioning and integrity
 Images: semver tags + immutable digest pins in `docs/MANIFEST`; `pull_policy: never` means
@@ -831,6 +859,7 @@ env-injected.
 | `MINIO_BUCKET` / endpoint | `he-promoted` / `http://minio:9000` | promote | in-net |
 | `MINIO_CONSOLE_BIND` | `127.0.0.1` [proposal] | compose | operator UI posture |
 | `LEDGER_REMOTE` | `origin/main` | engine | A13 queue-on-failure |
+| `BACKUP_ROOT` | `/mnt/c/Users/steven/OneDrive/Backup/HE-toolstack` | host backup timer (R-8) | D-14/NFR-22 canonical destination; WSL-visible; layout `heat-data/`, `repo/`, `drills/` |
 ### 11.5 Build, deploy, rollback, migration sequence
 *(Standards list build before topology in §11's enumeration; this document's subsection numbering follows the on-page
 order 11.1 envs → 11.2 prereqs → 11.3 topology → 11.4 config layering → 11.5 build/deploy →
@@ -864,7 +893,7 @@ prohibition: no step a fresh session can't run blind)
 - **R-3 GPU class won't admit:** check `GPU_CLASS_ENABLED` + C6 ticket state + probe file
   (profile `gpu`); expected *normal* state until C6 — do not "fix" by toggling flag (FR-18
   ruling).
-- **R-4 restore:** fresh host dirs from nightly rsync → `make up` → T-11 drill: pull one
+- **R-4 restore:** fresh host dirs from nightly backup at the canonical backup root (§6.9, via WSL) → `make up` → T-11 drill: pull one
   promoted object by versionId, digest-compare → run M0 slice (§11.5 deploy smoke).
 - **R-5 spawn channel broken (OQ-5 dependent):** sidecar restart (`make up workflow-engine`
   scoped) → verify via `make test-smoke` → if docker.sock class issue: host docker service
@@ -874,6 +903,12 @@ prohibition: no step a fresh session can't run blind)
   succeeded stand (design §6.5).
 - **R-7 disk full:** engine refuses at hard watermark (FM-6); operator archives cold runs to
   archive disk (promotion copies exist in MinIO) — decision support: `du` report command.
+- **R-8 backup health / stale mirror:** timer missed or `BACKUP_ROOT` unreachable (C: unmounted,
+  OneDrive paused): nightly job writes a ledger line + sentinel `heat-data/backup.status.json`
+  (`{ts, bytes, dest}`); `make doctor` fails if sentinel age > 36 h [P]. Fix path: re-mount/enable,
+  re-run job manually (`make backup`), confirm sentinel + OneDrive sync state; if root is gone for
+  >7 days, escalate: hot data is single-copy — pause promotions? no: promotions continue (git +
+  MinIO tiers unaffected), but flag `backup_stale` in healthz (NFR-22 guard).
 
 ---
 
@@ -893,10 +928,12 @@ prohibition: no step a fresh session can't run blind)
 | FM-9 | git remote unreachable | real precedent [E Stage-E friction] | ledger local-only | push-retry counter in logs | local queue + retry (A13); process continues | push drains on restore | contract-test w/ mock remote [proposal] |
 | FM-10 | image digests drift from MANIFEST | low | wrong-bits physics | admission refuses (`409 digest_unpinned`) + CI | pull_policy never; seed is the writer | re-seed / MANIFEST update via ADR-shaped review | T-16 |
 ### 12.2 Backups & restore
-Backup = host-dir rsync (nightly, second disk) + git remote; **RPO:** ≤24 h for hot tier
+Backup = host-dir mirror (nightly) to the canonical backup root
+`/mnt/c/Users/steven/OneDrive/Backup/HE-toolstack/` (§6.9, D-14) + git bundle of `workflows/` into the
+same root (the GitHub remote remains the process-state tier, not a backup destination). **RPO:** ≤24 h for hot tier
 (nightly cadence; git near-real-time for process state) — stated openly as weak spot,
 improvement path = hourly incremental [proposal, M2 decision]. **RTO:** fresh install =
-seed script (pre-baked tars) + `make up` + rsync restore + R-4 drill; target ≤60 min
+seed script (pre-baked tars) + `make up` + restore from backup root (WSL) + R-4 drill; target ≤60 min
 [proposal — validated by the drill itself, the *only* credible metric source].
 
 ### 12.3 Graceful degradation
@@ -1058,7 +1095,7 @@ verified before any M3 planning session, same discipline as C6.
 
 **Self-assessment vs §7 checklist.** Complete: every §6 component answers the §7 question
 set (problem, necessity, responsibilities, interfaces, data, dependencies, failure, tests,
-deployment, limits) or is explicitly [P]; requirements traceability 100% (63 IDs →
+deployment, limits) or is explicitly [P]; requirements traceability 100% (64 IDs →
 components → T-tests, matrix in REQUIREMENTS §5, script-verified); interfaces specified at
 process boundaries (§7 all, incl. error envelope, timeouts, versioning, idempotency); no
 undocumented internals; failure modes tabled (FM-1…10) w/ recovery runbooks R-1…7;
@@ -1142,14 +1179,14 @@ sequenceDiagram
 ### D8 — Backup & restore (T-11 / R-4 normalized)
 ```mermaid
 sequenceDiagram
-    participant H as host ops (rsync nightly)
+    participant H as host ops (nightly mirror)
     participant HD as heat-data
     participant M as minio (versioned)
     participant N as fresh/rebuilt env
     Note over HD: steady state: runs + stack.db + ledger mirror + minio/ volume
-    H->>HD: rsync -a (nightly, 2nd disk) [RPO <= 24h]
+    H->>HD: mirror nightly -> OneDrive/Backup/HE-toolstack [RPO <= 24h, D-14]
     Note over M: promoted objects carry MinIO version IDs (registry-linked)
-    N->>HD: rsync restore from nightly
+    N->>HD: restore from backup root (via WSL)
     N->>M: make up (minio recovers from in-dir volume)
     N->>M: GetObject(bucket,key,versionId) per registry evidence row
     N->>N: sha256 compare vs registry digests (pass = restored)

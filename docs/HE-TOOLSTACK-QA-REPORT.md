@@ -1,6 +1,6 @@
 # HE-toolstack Phase 2 — QA Verification Report
 
-**Document:** `docs/HE-TOOLSTACK-QA-REPORT.md` · v1.0 · 2026-11-14 (P2.5)
+**Document:** `docs/HE-TOOLSTACK-QA-REPORT.md` · v1.1 (rev 2026-11-15: +Q13 for D-14 backup-root change set) · 2026-11-14 (P2.5)
 **Method:** machine-checked where possible (scripts re-run against the repo at HEAD, not
 memory); manual where a human judgment is unavoidable (then stated as such). Baseline:
 commit `b520931` (main).
@@ -21,8 +21,9 @@ commit `b520931` (main).
 | Q10 | Design-state honesty statement present ("proposed, not yet built") | **PASS** | TD §1 |
 | Q11 | Evidence-tag density [V]/[E]/[P]/[proposal]/[U] | **PASS** | 112 tags in TD |
 | Q12 | Commits cited in review doc exist in git history | **PASS** | f44c294, 4c887f8, 0ed664b, 141249d all present |
+| Q13 | Rev 2026-11-15 (D-14 backup-root ruling) cross-doc sweep: no doc names another authoritative backup destination; NFR-22 ↔ TD §6.9/§9.4/§12.2/D8/R-4/R-8/`BACKUP_ROOT` ↔ ADR-D-14 all resolve | **PASS** | post-rev grep: zero stale `second disk`-as-destination refs in the v2 doc set |
 
-**Automated: 12/12 PASS** (two initial FAILs were checker defects, documented above —
+**Automated: 13/13 PASS** (two initial FAILs were checker defects, documented above —
 not document defects; corrected checkers re-run).
 
 ## 2. Manual QA (author, flagged non-authoritative)
