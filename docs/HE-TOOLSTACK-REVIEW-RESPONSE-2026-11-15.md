@@ -19,7 +19,7 @@ channel) are **requests for decision**, not assumed approvals.
 | FINDING-01 — loopback/`host.docker.internal` networking claim unverifiable | **ACCEPTED — fixed with measured evidence** | REQ NFR-07 rewrite, FR-01 client URL; TD §6.4, §10 network rows; ADR-D-01 amendment + **new ADR-D-15 (operator decision requested)** | Live probe from inside a container: `172.17.0.1:8100` reachable; `host.docker.internal` resolved to `192.168.65.254` and got ConnectionRefused on loopback services. Design now specifies the bridge-gateway form + published-port pattern `127.0.0.1:PORT:PORT` (no `0.0.0.0` exposure — NFR-07 conflict removed). Final bind-address choice = **D-15, yours**. GitHub #2 |
 | FINDING-02 — container lifecycle ownership undefined | **ACCEPTED — fixed** | TD new §6.10 (lifecycle classes A/B/X), D9 diagram (validated), janitor rules, shutdown order, reconcile-on-start; REQ NFR-10 rewrite | Every container now has exactly one named owner across compose-managed / engine-spawned / host-timer classes; expired containers ≤15 min kept for log capture then reaped. GitHub #3 |
 | FINDING-03 — Docker-socket privilege placement | **ACCEPTED — fixed; recommendation only, decision yours** | TD §6.2 (engine never sees a socket under any option), §5.4b security-boundary table, §13.1 spawn-seam code layout; **ADR-D-16 (3-option comparison, operator decision requested)** | Honest framing kept: a sidecar redistributes privilege, it does not remove it. Review §5.3 side-effect areas covered: uid alignment, audit logging, allow-list enforcement point. GitHub #4 |
-| FINDING-04 — SQLite single-writer claim vs read path | **ACCEPTED — fixed** | TD §6.7 writer-ownership table per DB, §8.8 claim protocol (BEGIN IMMEDIATE + version check), WAL mode stated; REQ NFR-09 amended | One writer per file, readers via WAL; concurrent-session claim race is now a specified protocol with test T-12 + property check. GitHub #5 |
+| FINDING-04 — SQLite single-writer claim vs read path | **ACCEPTED — fixed** | TD §6.7 writer-ownership table per DB, §8.8 claim protocol (BEGIN IMMEDIATE + version check), WAL mode stated; REQ NFR-09 amended | One writer per file, readers via WAL; concurrent-session claim race is now a specified protocol with test T-12 + property check. GitHub #5  **(r3 supersession: this row and the r2 §8.8 O_EXCL revision are both superseded — see Appendix C.)** |
 | FINDING-05 — backup atomicity/consistency (hot SQLite, OneDrive) | **ACCEPTED — fixed** | TD new §6.9 host backup job (sqlite `.backup` API → staging → manifest → fsync → rename → DONE), RPO/RTO stated, OneDrive staleness alarm `backup_stale`; REQ NFR-22 amended, NFR-19 cross-ref; ADR-D-14 A1 amendment; T-18 drill | The review's durability demand is met with primitives named explicitly (`sqlite3 .backup`, fsync+atomic rename, write-ahead manifest ordering §5.4a). GitHub #6 |
 | FINDING-06 — MinIO liveness conflated with dependency | **ACCEPTED — fixed** | TD §7 health model split `/healthz` vs `/readyz` vs `/deps`, §6.3 depends_on corrected (service_healthy only where truthful); REQ NFR-23 | MinIO is now an **optional dependency** (promotion/replay path), never a startup gate for the core loop; degradation is observable, not fatal. GitHub #7 |
 | FINDING-07 — 202-vs-201 queue-accept semantics | **ACCEPTED — fixed** | FR-01 rewritten to **201 Created** + `{job_id, queue_pos}` with contract suite (T-08); **ADR-D-18 (new record)**; he-client + status-model text aligned | Review §5 note honored: semantics fixed at the requirement level, not silently in a client shim. GitHub #8 |
@@ -189,3 +189,112 @@ round-2 gates.
 All 8 corrections addressed in `3feb698`. **STOP per §10 of round-1 protocol remains in
 force:** nothing merged, nothing implemented, nothing deployed; awaiting human re-review
 of PR #11.
+
+
+---
+
+# Appendix C — Round-3 response (2026-11-16): "Ticket concurrency and SQLite ownership"
+
+**Mode: documentation-only.** No mechanism implemented, no containers run, nothing merged,
+no issues closed.
+
+## C.1 — Ticket claims were not mutually exclusive: ACCEPTED
+
+The reviewer is correct on both counts against the branch text:
+- The original §8.8 sequence (`read → check → atomic-rename write → ledger append`) is not
+  compare-and-swap. Two sessions can read the same unclaimed ticket, pass the check, and
+  both rename successfully — the last writer silently overwrites the first claim. Atomic
+  rename guarantees *whole-file visibility*, not mutual exclusion. The stale-claim
+  supersede path had the identical race.
+- The r2 "correction" (`O_CREAT|O_EXCL` lockfile) fixed crash-release but **not**
+  mutual exclusion either: `O_EXCL` is a *point* create-race arbiter; every claimant
+  removes the lockfile after use, so a claimant that creates the lock after that removal
+  reads and writes the ticket while a previous holder is still inside its critical
+  section.
+
+**Resolution (TD §8.8 r3 rewrite):** a real held lock — **`flock(2)` advisory lock on
+`workflows/tickets/.locks/<id>.lock`** (dir 0755 / file 0644, single HE user; flock is
+mandatory against itself, so the protocol is race-free even in one process). Same claimant
+acquires the same per-ticket lock **before reading** — timeout via bounded
+`HE_CLAIM_WAIT_MAX` (default 5 s [P], 100 ms backoff) ⇒ `409 already_claimed`, and a loser
+never reads or modifies the ticket — and holds it through: classify → `claimed:` line
+(write→fsync) → ledger claim event → claim payload → release; `he ticket done` uses the
+same lock. Process-crash release is kernel-guaranteed (§8.8a);
+stale claims are superseded **while holding** the lock after heartbeat staleness
+(payload `heartbeat_at`, tick 60 s [P], stale beyond `HE_CLAIM_STALE_MIN` 30 min [P] **and**
+no current lock holder); a hung-but-alive holder keeps the lock by design (ops path =
+deliberate `kill`, kernel then releases); documented
+assumptions: one host, one Docker engine, Linux Local FS (flock per open file description
+— NFS/fuse/CIFS explicitly unsupported), no lock daemon (consistent with the D-03
+no-daemon ruling). Rename and O_EXCL are no longer called a lock or CAS anywhere, and no rename acts as
+arbiter in any path — supersede waits for the lock, never clobbers.
+
+## C.2 — SQLite table ownership was internally contradictory: ACCEPTED
+
+The reviewer is right: §6.7/§8.4 asserted toolserver sole-writer of `queue` while §7.5
+gave the engine an `UPDATE queue SET state='claimed'…` — under a per-table ownership
+model these cannot all be true. The r2 traceability gate validated each row in
+isolation, so it never caught the cross-section conflict; that is a genuine QA blind
+spot, now closed by a new ownership-coherence gate (QA Q23) and grep evidence.
+
+**Resolution (reviewer option 2 — explicit inbox; ADR-D-08 A1 rewritten, stays
+Proposed):** toolserver's *only* write anywhere in the engine DB is `INSERT INTO
+submissions(... idempotency_key UNIQUE ...)`; the engine consumes each row in ONE
+`BEGIN IMMEDIATE` transaction (dedup against `idempotency_keys` at consume → `INSERT
+queue` + immutable job_spec → `DELETE` consumed row → commit) and is sole writer of
+`queue` and every other table. §8.4b is now a normative SQL-ownership table (every
+mutation, owning process, txn boundary, affected-rows semantics). WAL admits one
+committer db-wide; no doc claims per-table concurrent writers or `busy_timeout`
+fairness (r2 text corrected); busy → bounded retry → honest `503`. Crash windows
+enumerated (§8.4b bullet 7): submission-not-consumed replays idempotently via key;
+half-consumed is impossible by the consume-transaction boundary; duplicate execution
+prevented by single dispatcher + conditional `WHERE state='queued'` transitions
+(affected-rows==1, else re-read + 409 — never blindly overwrite). Dual-writer on
+`queue` itself (option 3) considered and **rejected** with reasons; no PostgreSQL;
+SQLite retained.
+
+## C.3 — Test/ADR alignment: ACCEPTED
+
+- **T-12 stays a process/discipline audit only** — the docs now state this explicitly in
+  the REQ disambiguation note; no doc claims T-12 proves concurrency.
+- **T-20 (restated):** ≥2 independent OS processes race `he ticket claim` — exactly one
+  winner; losers never read/write the ticket; supersede path armed ⇒ one winner;
+  claimant-`kill -9` ⇒ kernel release ⇒ fresh claim completes; retry ⇒ no double-claim.
+- **T-21 (restated):** flock supersede + expiry, two concurrent superseders serialize
+  (loser 409), hung-but-alive holder NOT supersedeable until pid death (asserted).
+- **T-23 (new):** SQLite submissions/claim crash matrix (4× distinct-key race = exactly
+  4 rows; 4× same-key race = exactly 1 queue row via consume-time dedup; `kill -9`
+  between submission and consume → replay once; `BEGIN IMMEDIATE` contention; bounded
+  busy behavior).
+- Matrix, REQ/QA headers, test counts (23) and QA gates updated; diagrams re-validated.
+- **ADR-D-08 remains Proposed** with an explicit status note that acceptance is gated on
+  the reviewer/operator ruling on this ownership model (OQ-6 reworded).
+
+## Files changed (round 3)
+- `HE-TOOLSTACK-TECHNICAL-DESIGN.md` v1.4 — §8.8 full rewrite + §8.8a–c (flock, flock
+  semantics, supersede/heartbeat, acquisition policy, boundaries), §7.5 submissions-inbox
+  rewrite, §8.2 note, **new §8.4b ownership/transaction table**, §6.1/§6.2/§6.7 synced,
+  D1 (toolserver DB edge + zero-publish label) / D2 (submissions inbox) labels, §14 pointer.
+- `HE-TOOLSTACK-REQUIREMENTS.md` v1.5 — FR-26 arbiter named; T-20/T-21 restated; **T-23
+  added**; disambiguation note; matrix rows + T-23.
+- `HE-TOOLSTACK-ADR.md` v1.4 — **ADR-D-08 A1 rewritten** (inbox model, options 1–3
+  evaluated, C rejected), status note on the record; OQ-6 reworded.
+- `HE-TOOLSTACK-QA-REPORT.md` — Q5/Q18/Q20/Q22 evidence refreshed; **new Q23**
+  (ownership-coherence gate: grep-verifies no doc grants the toolserver a `queue` UPDATE
+  and that §8.8 never calls rename/O_EXCL a lock/CAS); totals updated.
+- Diagrams: D1 (toolserver edge → INSERT-submissions-only), D2 (submissions inbox label);
+  state-flow (claims) already labels flock from r2 — verified.
+
+## Remaining risks & decisions
+1. **ADR-D-08 (r3 A1) = OQ-6: reviewer/operator accept required.** Proposed, not assumed.
+2. **flock is advisory**: a hand-edited ticket that bypasses `he ticket` invalidates the
+   guarantee — documented boundary, enforcement is a Stage-E code-lint item, not a DB
+   constraint.
+3. Non-Local filesystems break flock (same class as SQLite) — stated and out of scope.
+4. T-20/T-21/T-23 remain **[P]** until Stage-B/C; nothing in this appendix is runtime
+   evidence.
+5. Stale-claim heartbeat tuning (30 min default) stays **[P]**.
+
+## Disposition
+Both round-3 findings accepted; corrections applied documentation-only. **STOP per §10
+remains in force:** nothing implemented, deployed, merged, or closed.

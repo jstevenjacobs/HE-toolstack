@@ -1,6 +1,6 @@
 # HE-toolstack Requirements Baseline
 
-**Document:** `HE-TOOLSTACK-REQUIREMENTS.md` · v1.4 (rev 2026-11-15b: review-response 2 — FR-26 claim arbiter upgraded to O_EXCL lockfile (TD §8.8 r2); NFR-01 `make down` single-stop-path; NFR-07/T-15 alias facts corrected [V re-probe 15b]; T-20 claim-mutex + T-21 stale-claim + T-22 MinIO-version tests added; T-12 disambiguated; prior v1.3: NFR-07 gateway URL, T-17/18/19; prior v1.2: FINDING-01…07 revisions; +NFR-22 v1.1 D-14) · 2026-11-14
+**Document:** `HE-TOOLSTACK-REQUIREMENTS.md` · v1.5 (rev 2026-11-16: round-3 — FR-26 claim arbiter = flock(2) held lock (TD §8.8 r3; r2 O_EXCL/rename retracted); T-20/T-21 restated for flock; T-23 added (SQLite claim/submission crash matrix); NFR-09 digest-chain wording unchanged. Earlier rev 2026-11-15b: review-response 2 — FR-26 claim arbiter upgraded to O_EXCL lockfile (TD §8.8 r2); NFR-01 `make down` single-stop-path; NFR-07/T-15 alias facts corrected [V re-probe 15b]; T-20 claim-mutex + T-21 stale-claim + T-22 MinIO-version tests added; T-12 disambiguated; prior v1.3: NFR-07 gateway URL, T-17/18/19; prior v1.2: FINDING-01…07 revisions; +NFR-22 v1.1 D-14) · 2026-11-14
 **Status:** Baseline for review (Phase 2 deliverable C of DesignStandards §8)
 **Upstream sources:** Phase 1 report (`docs/PHASE1-ARCHITECTURE-DISCOVERY.md`, commit `141249d`)
 §2–§5; PD-toolstack `STACK-DESIGN-v3.md` (v3.8.1) and `STACK-AS-BUILT.md` (D-ledger D1–D27);
@@ -114,7 +114,7 @@ existing solver images.
 | FR-23 | Workflow definition is a versioned file in `workflows/`; the runner (~200-line loop [P], D-02) executes steps, no durable-exec platform in initial release. | P0 | [P]; O'Reilly checkpoint pattern; LangGraph deferred on named tripwires (D-02) | T-01, T-02 | Definition file + runner drive M0 loop end-to-end; tripwires documented as revisit conditions |
 | FR-24 | Per-run state file `state.json` (schema §9 of tech design) is the single authoritative run record, updated by atomic rename (D-05). | P0 | [E D25 divergence lesson] | T-07 | Torn-write impossible (rename); schema validation on every read; resume uses state alone |
 | FR-25 | Append-only ledger rows with mandatory `ref:` to fetched source/observed artifact; missing ref = gate failure. | P0 | [E] ledger discipline is attempt-1's best ops artifact | T-01 | Every state transition's ledger row parses + has resolvable ref; ledger never rewritten |
-| FR-26 | Ticket protocol: single-writer `workflows/tickets/*.md` claimed before execution; ≤3-line done-check verified in-session before completion. | P0 | [E] claim/done discipline enforced at Stage E | T-01, T-12 | No two claimed tickets same file; done-check text appears in the session's own outputs |
+| FR-26 | Ticket protocol: `workflows/tickets/*.md` claimed **under the per-ticket flock (§8.8 r3)** before execution; ≤3-line done-check verified in-session before completion. | P0 | [E] claim/done discipline enforced at Stage E (discipline [E]; flock mechanism [P]) | T-01, T-12 (process audit), **T-20/T-21 (concurrency)** | No two claimed tickets same file; done-check text appears in the session's own outputs |
 
 ### 2.7 Artifact management
 
@@ -264,8 +264,10 @@ URL. Auth deferred behind this boundary and documented as deferred (tech design 
 | T-11 | MinIO promote + versioning **count-diff** + restore drill; **and** the §6.9 full backup taken **while jobs run** via `--allow-active` (r2 scope: reconciles the default refuse policy — the load backup is *this drill's explicit exception*, recorded with `active_jobs_at_start`), restoring the full §6.9 sequence and verifying ext4-staging → OneDrive-destination transfer integrity (step-5 read-back) | ops drill | FR-29, NFR-17, NFR-22 |
 | T-12 | Ticket/cleanup discipline audit (done-check attestation, scratch sweep) | process | FR-26/40, NFR-12 |
 
-> **ID disambiguation (r2):** **T-12** = ticket/cleanup *process* audit only. The
-> §8.8 claim mutual-exclusion proof is **T-20** (not T-12); digest-chain verification is **T-04/T-10**.
+> **ID disambiguation (r3):** **T-12** = ticket/cleanup *process* audit only — it proves
+> discipline, **not** concurrency. The §8.8 flock mutual-exclusion proof is **T-20**,
+> supersede/expiry is **T-21**, SQLite queue/submission races + crash windows are **T-23**;
+> digest-chain verification is **T-04/T-10**.
 > TD §5.4-principle-4 and ADR-D-18 refs corrected accordingly.
 | T-13 | Compose lifecycle (up/down zero-orphan, cold bring-up, gitleaks CI) | deployment | NFR-01/06/10 |
 | T-14 | Worker-seam + extensibility exercises (add-solver-path review, second worker identity) | architecture test | NFR-05/20 |
@@ -274,9 +276,10 @@ URL. Auth deferred behind this boundary and documented as deferred (tech design 
 | T-17 | Agent-container connectivity probe (FINDING-01; runs **from inside** a container like the agent's, host-side curl does not count) | e2e network | NFR-07, FR-01 |
 | T-18 | Backup consistency + OneDrive-offline staleness alarm (sqlite `.backup` product integrity; `backup_stale` escalates) | drill | NFR-22 |
 | T-19 | Daemon-restart reconciliation drill RC-3 (restart dockerd mid-job → re-adopt/re-queue per §8.6, gapless ledger) | drill | NFR-24, §12.5 RC-3 |
-| T-20 | Concurrent ticket-claim **mutual exclusion** (TD §8.8 r2, O_EXCL lockfile): N≥4 processes race `he ticket claim` on one fresh ticket (concurrent API calls or direct `open(..., O_CREAT\|O_EXCL)` against the shared host dir; harness never serializes); **exactly one** creator wins, all others `EEXIST`→409 `already_claimed`; ledger holds exactly one claim event; crash between ticket-rename and lock-unlink leaves ticket done/claimed consistently (reconcile = done/ truth); 10× repetition | concurrency test | FR-23…26, NFR-11 |
-| T-21 | **Stale-claim supersede** (TD §8.8 r2): kill a claimant mid-session → after heartbeat staleness (default 30 min [P], config `HE_CLAIM_STALE_MIN`) with no progress line, a second session's CAS supersede (rename `.stale-<ts>` + re-`O_EXCL`) succeeds and ledger notes it; a concurrent superseder that loses the rename gets `EEXIST`; no ticket stuck unclaimable-while-held forever | concurrency test | FR-23…26, NFR-11 |
+| T-20 | Concurrent ticket-claim **mutual exclusion** (TD §8.8 **r3 flock protocol**): **≥2 independent OS processes** (independent `flock()` calls; harness must not serialize) race `he ticket claim` on one fresh ticket — **exactly one** acquires the lock and claims, losers bounded-wait → `409 already_claimed`, **no loser reads or writes the ticket**; ledger holds exactly one claim event; the same race run with the supersede path armed (stale payload present) yields exactly one winner; **claimant-crash test:** `kill -9` the holder mid-critical-section → kernel releases the lock → a fresh claimant acquires and completes coherently; **retry test:** losers retry after winner releases and observe done/claimed states, never double-claim; 10× repetition, zero double-claims | concurrency test | FR-23…26, NFR-11 |
+| T-21 | **Stale-claim supersede + expiry** (TD §8.8 **r3**): kill a claimant mid-session → after heartbeat staleness (`HE_CLAIM_STALE_MIN`, default 30 min [P]) **and** kernel-released lock, a second session acquires, re-verifies staleness under the lock, supersedes (ledger notes `superseded:`), and claims; **two concurrent superseders ⇒ exactly one proceeds** (flock serializes; loser 409); hung-but-alive holder is NOT supersedeable by design (test asserts 409 until the pid is killed); no ticket stuck unclaimable forever | concurrency test | FR-23…26, NFR-11 |
 | T-22 | MinIO **version-history** sufficiency (NFR-22/FINDING-05): overwrite a gate-passed object N× in a versioned bucket; `mc mirror` full-then-`--remove` incremental to staging; delete locally then re-mirror → object returns from server-side version history; manifest verifies; staged copy lands via ext4 staging → atomic rename into `BACKUP_ROOT` (never mid-write visible at destination) | backup-integrity test | NFR-22, FR-29 |
+| T-23 | **SQLite queue/submission concurrency + crash matrix** (TD §7.5 r3 submissions inbox, §8.4b): (a) N≥4 concurrent `POST /v1/jobs` with **distinct** keys → N queue rows exactly (no loss/dup); (b) same `idempotency_key` raced 4× → **exactly one** queue row, dup requests resolve to the existing job id (dedup at consume); (c) engine `kill -9` between submission-insert and consume → after restart the submission is consumed once (idempotent replay), no half-consumed row; (d) `BEGIN IMMEDIATE` contention: concurrent consumes never interleave (affected-rows checks hold); busy/`503` behavior bounded-retry-then-honest | concurrency/failure-injection test | FR-16/37/39, NFR-02 |
 
 ## 5. Requirements traceability matrix (v1.4: +T-20; T-12 scope disambiguated) (requirement → components → tests)
 
@@ -289,16 +292,16 @@ MO=minio, REG=registry(SQLite-in-WE), HEA=he-client, HD=heat-data(host dir), IM=
 | FR-01…05 | TS, WE, HEA | T-08, T-01, T-09 |
 | FR-06…09 | TS, HD, IM(property), WE | T-01, T-04, T-08, T-09 |
 | FR-10…15 | IM(tasmet/gmsh/openfoam/calculix/property/agentcad), WE, TS | T-01, T-09, T-04 |
-| FR-16…19 | WE(gpu-admission), OPS | T-05, T-06 |
+| FR-16…19 | WE(gpu-admission), OPS | T-05, T-06, T-23 |
 | FR-20…22 | PG, HD, IM, WE | T-01, T-03, T-04 |
-| FR-23…26 | WE, HD(workflows/), OPS | T-01, T-02, T-07, T-12 |
+| FR-23…26 | WE, HD(workflows/), OPS | T-01, T-02, T-07, T-12, T-20, T-21 |
 | FR-27…29 | HD, MO, WE | T-01, T-07, T-11, T-12 |
 | FR-30…32 | TS, REG, MO | T-08, T-10 |
 | FR-33…34 | REG, TS | T-10 |
-| FR-35…38 | WE, HD | T-01, T-02, T-05, T-07 |
+| FR-35…38 | WE, HD | T-01, T-02, T-05, T-07, T-23 |
 | FR-39…40 | HEA, HD, TS | T-08, T-02, T-12 |
 | FR-41…42 | *(M3+ — excluded from initial-release matrix)* | — |
-| T-17…22 (finding-response + r2 tests; reqs themselves rowed above) | NFR-07, NFR-11, NFR-22, NFR-24 | T-17, T-18, T-19, T-20, T-21, T-22 |
+| T-17…23 (finding-response + r2/r3 tests; reqs themselves rowed above) | NFR-07, NFR-02, NFR-11, NFR-22, NFR-24 | T-17, T-18, T-19, T-20, T-21, T-22, T-23 |
 | NFR-01…02 | OPS, WE | T-13, T-05 |
 | NFR-03…04 | WE, TS, host | T-01, T-09 |
 | NFR-05 | WE(worker seam) | T-14 |

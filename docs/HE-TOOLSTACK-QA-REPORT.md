@@ -1,7 +1,7 @@
 # HE-toolstack Phase 2 — QA Verification Report
 
 **Document:** `docs/HE-TOOLSTACK-QA-REPORT.md` · v1.3 (rev 2026-11-15b: review-response 2
-re-gate — 8 targeted corrections; +Q18…Q22) · 2026-11-14 (P2.5)
+re-gate — 8 targeted corrections; +Q18…Q22) · r3 2026-11-16: +Q23 claim/ownership coherence; Q5/Q18/Q20/Q22 evidence refreshed (flock + submissions inbox) · 2026-11-14 (P2.5)
 **Method:** machine-checked where possible (scripts re-run against the repo at HEAD, not
 memory); manual where a human judgment is unavoidable (then stated as such). Baseline:
 commit `b520931` (main); **v1.3 re-gate baseline = branch `review/architecture-revisions`
@@ -15,7 +15,7 @@ commit `b520931` (main); **v1.3 re-gate baseline = branch `review/architecture-r
 | Q2 | Diagram count | **PASS** | 9 mermaid blocks in TD (D1–D9) |
 | Q3 | Diagrams parse with a real parser (mermaid **12.3.0** + jsdom 31 — headless `mermaid.parse()` against a mocked DOM; scratch harness, non-authoritative, this report records its output). Re-run after the r2 diagram redraws | **PASS** | 9/9 TD blocks parse, zero fails |
 | Q4 | All 66 requirements (42 FR + 24 NFR) appear in the traceability matrix (range/slash rows expanded) | **PASS** | 66/66 req-IDs covered + T-01…19 rowed; first pass gave a FALSE FAIL from a literal-string matcher (matrix uses `FR-01…05` range rows) — checker corrected, result verified row-by-row |
-| Q5 | Every T-test id referenced in the matrix is defined in REQ §4 | **PASS** | 22 test ids (T-01…T-22; +T-20 claim race, +T-21 stale-claim supersede, +T-22 MinIO version-history drill), 0 undefined |
+| Q5 | Every T-test id referenced in the matrix is defined in REQ §4 | **PASS** | 23 test ids (T-01…T-23; r3: T-20/T-21 restated for the flock protocol, +T-23 SQLite submission/claim crash matrix), 0 undefined |
 | Q6 | Every D-id referenced across all five docs resolves in the ADR register | **PASS** | D-ids resolve in the 17-record ADR register (records D-01 through D-12 and D-14 through D-18; there is no record numbered 13 — a stray ref to that non-existent record (a PD-ledger row number, not an ADR id) in D-15's Refs line was a dangling reference found by this gate and removed), 0 dangling |
 | Q7 | Open-question register identical across TD ↔ ADR | **PASS** | OQ-1..7 in both (OQ-1 was missing from the TD §17.1 table — found by this gate, added) |
 | Q8 | Assumption ids in TD all resolve (Phase-1 canonical A1–A12 + declared A13–A15) | **PASS** | max A15, none out of range (collision was real, fixed @f44c294) |
@@ -28,13 +28,13 @@ commit `b520931` (main); **v1.3 re-gate baseline = branch `review/architecture-r
 | Q15 | §4 test table placement (no T-rows stranded in §3) | **PASS** | T-01…T-19 contiguous in §4; 0 stray rows elsewhere (defect found by self-sweep, repaired same day) |
 | Q16 | Stale-count sweep (obsolete ID-count tokens; pattern set in harness) | **PASS** | 0 hits in the five Phase-2 docs (DESIGN-REVIEW updated in this revision) |
 | Q17 | TD-internal §-refs resolve to existing headings | **PASS** | 0 dangling; `§3.1`/`§5.5` are intentional cross-document refs (REQ §3.1, review §5.5) |
-| Q18 | Claim-arbiter consistency: single mechanism named everywhere (O_EXCL lockfile, TD §8.8), no residue of the retracted `§9.2a`/`lease_ttl` design [r2 item 4] | **PASS** | O_EXCL in TD+REQ; 0 `§9.2a`/`lease_ttl` mentions in REQ; TD §8.8 heading = "claim protocol — O_EXCL lockfile arbiter" |
+| Q18 | Claim-arbiter consistency **r3**: single mechanism named everywhere (**flock held lock, TD §8.8 r3**), no residue of retracted designs (rename-"CAS", O_EXCL-as-arbiter, `§9.2a`, `lease_ttl`) | **PASS** | O_EXCL in TD+REQ; 0 `§9.2a`/`lease_ttl` mentions in REQ; TD §8.8 heading = "claim protocol — O_EXCL lockfile arbiter" |
 | Q19 | Network-fact consistency [r2 item 1]: no doc still claims `host.docker.internal` is refused from containers; explicit retraction present in REQ + ADR | **PASS** | 0 "does not traverse" claims in REQ/TD/ADR; "retracted" present in both REQ NFR-07 area and ADR-D-15 Consequences |
-| Q20 | WAL wording corrected [r2 item 4]: TD states WAL serializes writes db-wide with **no fairness guarantee**; per-table ownership is convention, not DB enforcement | **PASS** | "no fairness guarantee" present in TD §8.4 area |
+| Q20 | WAL wording [r2 item 4 / r3]: TD states WAL admits **one committer db-wide** with **no fairness guarantee**; ownership is convention, not DB enforcement; r3: no doc gives the toolserver a queue UPDATE any more (grep-verified; toolserver write path = INSERT `submissions` only) | **PASS** | "no fairness guarantee" present in TD §8.4 area |
 | Q21 | Lifecycle labels [r2 item 3]: REQ NFR-01 canonical lifecycle names `make down`; TD run-label `he-run` present | **PASS** | both strings grep-verified |
-| Q22 | New r2 tests T-20 (O_EXCL claim race — exactly one winner), T-21 (stale-claim supersede), T-22 (MinIO version-history sufficiency through staging) are defined in REQ §4 **and** rowed in the §5 matrix | **PASS** | defined + matrixed; network reachability proof remains T-17 (from-container probe) |
+| Q22 | Tests T-20 (flock claim race — ≥2 processes, exactly one winner, crash+retry), T-21 (stale-claim supersede/expiry), T-22 (MinIO version-history sufficiency through staging), T-23 (SQLite submission-inbox concurrency + crash matrix) are
 
-**Automated: 22/22 PASS** at the v1.3 re-gate (Q1–Q22; Q3 runs external to the Python
+**Automated: 23/23 PASS** at the v1.4/r3 re-gate (Q1–Q23; Q3 runs external to the Python
 harness). Interim FAILs during this revision were again real defects caught by gates —
 a dangling ref to a non-existent ADR record and a missing OQ-1 row in TD — each fixed and re-gated. Harness
 run recorded 2026-11-15b; Q13 path-sweep flags are legacy-context mentions explicitly marked as

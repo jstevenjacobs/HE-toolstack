@@ -1,6 +1,6 @@
 # HE-toolstack Technical Design Document
 
-**Document:** `HE-TOOLSTACK-TECHNICAL-DESIGN.md` · v1.3 (rev 2026-11-15b: review-response 2 — §6.2b normative spawn-sidecar API spec; §6.10 lifecycle classes + labels; §8.8 real claim mutual exclusion (O_EXCL lockfile arbiter); §6.7 WAL fairness corrected; §5.1 probe matrix re-run + Ollama bind finding [V]; D1/D2/D3/D4/D5/D8/D9 redrawn; prior v1.2: review response 1) · 2026-11-14
+**Document:** `HE-TOOLSTACK-TECHNICAL-DESIGN.md` · v1.4 (rev 2026-11-16: round-3 corrections — §8.8 ticket claim = flock(2) held-lock protocol; §7.5/§8.4b queue write-ownership resolved via submissions inbox. Earlier rev 2026-11-15b: review-response 2 — §6.2b normative spawn-sidecar API spec; §6.10 lifecycle classes + labels; §8.8 real claim mutual exclusion (O_EXCL lockfile arbiter); §6.7 WAL fairness corrected; §5.1 probe matrix re-run + Ollama bind finding [V]; D1/D2/D3/D4/D5/D8/D9 redrawn; prior v1.2: review response 1) · 2026-11-14
 **Status:** Revised for re-review (DESIGN STATUS: CHANGES REQUESTED response package; Phase 2 deliverable A of DesignStandards §8)
 **Revision log (v1.2 → v1.3, r2 second-review items 1–8):** sidecar API normative spec §6.2b (operation-canonical paths; ADR/QA/TD synced); §8.8 claim = O_EXCL lockfile CAS (rename-CAS was the reviewer's item-3 objection, valid); WAL db-wide-write correction §6.7/§7.5; network probe matrix corrected + host-bind audit §5.1/§5.3/§6.4/D1/D4 (the hdi-refusal claim was over-generalized — fixed); backup: mc-mirror version-history + cross-fs transfer (mv-is-atomic claim only holds same-fs) §6.9; diagrams D1/D4 now show sidecar+gateway; lifecycle label triple normalized §6.10. (v1.1 → v1.2 adds review-§5.5 failure-class taxonomy (§12.5) + R-9 drill; §5.1 session/claim protocol §8.8; §5.2 durability matrix §5.4a; §5.4 security-boundary table §5.4b; §5.3 admission-soundness note §6.4; FM-11…13; T-17…19 refs; OQ-7; gateway-form client URL).**
 **Revision log (v1.1):** F1 client URL/bind topology (§5.1 D1, §6.4, §7.1); F2 lifecycle classes + §6.10 + D9; F3 spawn-sidecar §6.2/§10.1; F4 per-table writers §6.7/§7.5/§8.2/§8.4; F5 backup procedure §6.9/§12.2; F6 MinIO dependency semantics §6.1/§6.5/§7.2/§12.3; F7 201 contract + state boundaries §7.2/§8; F8 counts/refs across the package.
@@ -224,7 +224,7 @@ CoolProp are in-image dependencies; GitHub is the evidence remote outside the bo
 graph TB
     subgraph Host["Host JSJ-Office (WSL2, RTX 5060 Ti, /dev/sdf 1TB ext4)"]
         subgraph Stack["HE-toolstack compose project (one lifecycle)"]
-            TS["toolserver :8100<br/>bind compose-net + publish 127.0.0.1:8100"]
+            TS["toolserver :8100<br/>zero published ports (D-15 rev)"]
             WE[workflow-engine<br/>queue+registry+runner]
             MO[minio :9000/:9001]
             JOB[per-job tool containers<br/>openfoam-esi / ta-solver-runtime /<br/>gmsh / calculix / agentcad / property-pipeline]
@@ -234,7 +234,10 @@ graph TB
         EMB["Ollama embeddings<br/>:11434 — co-resident, protected"]
         TS --- HD; WE --- HD; JOB --- HD
         AG -- "HTTP/JSON via http://toolserver:8100<br/>(dedicated he-agent net, D-15 rev; zero publish [V])" --> TS
-        TS --> WE; WE -- "docker run (host engine)" --> JOB
+        TS -- "INSERT INTO submissions ONLY<br/>(r3 inbox, §8.4b)" --> DB[(SQLite run_registry.db<br/>WAL; engine sole writer<br/>of queue + all else)]
+        TS --> WE
+        WE --> DB
+        WE -- "docker run (host engine)" --> JOB
         WE -- "promote (boto3)" --> MO
         JOB -- "nvidia runtime, flag-gated (C6)" --> GPU[(RTX 5060 Ti<br/>1 concurrent GPU job, ≤8 GiB)]
     end
@@ -258,7 +261,7 @@ graph LR
         TS[toolserver<br/>REST, OpenAPI, idempotency]
     end
     subgraph Control["Control plane (workflow-engine)"]
-        Q[(queue<br/>SQLite WAL)]
+        Q[(queue + submissions inbox<br/>SQLite WAL)]
         R[(candidate registry<br/>SQLite WAL)]
         RU[runner<br/>~200 LOC step exec]
         ADM[gpu-admission fn<br/>FR-16/17]
@@ -277,7 +280,7 @@ graph LR
         MI[(minio<br/>promoted immutable)]
         GI[(git ledger<br/>evidence)]
     end
-    TS --> Q; TS --> R
+    TS -->|INSERT submissions only| Q; TS --> R
     Q --> ADM; Q --> RU
     RU --> I1 & I2 & I3 & I4 & I5 & I6
     I1 & I2 --> PG
@@ -414,9 +417,9 @@ proven by ledger.
   writes into workflows/ (runner), physics verdicts (gate scripts), MinIO credentials
   (engine's promote worker holds them).
 - **Internal modules [P]:** `api.py` (FastAPI app, ~400 LOC budget), `jobs_repo.py`
-  (SQLite via same WAL file as engine — **per-table writer ownership, F4/OQ-6 proposed
-  resolution ADR-D-08 A1**: toolserver opens RW **only** on `queue` + `idempotency_keys`
-  tables; engine owns every other table. **WAL note (r2 item 7):** SQLite WAL serializes
+  (SQLite via same WAL file as engine — **r3 ownership (canonical §8.4b)**: toolserver opens RW for
+  `INSERT INTO submissions` **only** (queue/idempotency dedup moved engine-side at consume,
+  §7.5); engine owns every other table; everything else read-only. **WAL note (r2 item 7):** SQLite WAL serializes
   writes **database-wide** — one write transaction at a time across ALL tables, not per
   table — so *table ownership is an application-level discipline* (prevents logical
   write-write conflicts on the same rows), not a SQLite enforcement; `busy_timeout 5 s`
@@ -456,7 +459,7 @@ docker-proxy to forward; host-side exposure is what stays loopback-only via the 
   survives agent-context loss, and enforces the write-ahead protocol (§5.4-3) in one place.
   This is the component that *replaces* both the never-built gpu-broker and the LangGraph
   leaning (D-02/D-03).
-- **Owns:** queue rows, job leases (single-writer within this process), worker seam,
+- **Owns:** queue rows (**sole writer**, fed by the toolserver's `submissions` inbox §7.5), job leases (single-writer within this process), worker seam,
   `workflows/` state law enforcement, ledger appends, promotion triggers. **Does not own:**
   HTTP edge (§6.1), physics logic, image builds.
 - **Internal modules [P]:** `queue.py` (SQLite WAL, states §8.2, one-writer loop),
@@ -820,21 +823,31 @@ host path) or presigned-free in-net S3 for tool containers. Keeps the HTTP edge 
 and the p95 latency budget honest (NFR-04).
 
 ### 7.5 Component-to-component interfaces
-- **toolserver → engine:** shared SQLite WAL with **per-table write ownership** (v1.1,
-  FINDING-04; ADR-D-08 A1 = proposed OQ-6 resolution, reviewer verdict pending): toolserver
-  sole writer of `queue` (+ `idempotency_keys`), engine sole writer of everything else
-  (`jobs` transitions, candidates, runs, gate_results, promotion_queue, reconcile_log).
-  Queue submission = one-transaction insert of `{queue row + immutable job_spec snapshot
-  fields}` (atomicity by single-row commit). Claim atomicity: `UPDATE queue SET
-  state='claimed', worker='engine' WHERE id=? AND state='queued'` + affected-rows==1 check —
-  WAL serializes DB-wide writes, so exactly one claim UPDATE commits first; every other
-  sees `state='claimed'` and the affected-rows check yields 0 → 409 (retry-on-busy makes no
-  fairness promise — correctness comes from the affected-rows check, not timing) [P; T-05
-  concurrent-claim test]. Crash: half-inserted submission cannot exist (transaction);
-  queued-but-never-claimed rows expire to `abandoned` via lease sweep (idempotent).
-  Integrity: engine owns migrations (`schema_migrations`, additive-only pre-M1 [P]) + weekly
-  `PRAGMA integrity_check` logged. The rejected alternative (engine-internal enqueue HTTP)
-  stays documented in OQ-6 for the reviewer.
+- **toolserver → engine (r3 — submissions inbox; resolves the write-ownership contradiction):**
+  the r2 text here contradicted §6.7/§8.4 by giving the toolserver an
+  `UPDATE queue SET state='claimed'…` operation — **that operation is deleted from this
+  design** (it made two processes writers of one table while §6.7/§8.4 claimed per-table
+  single-writer). Adopted model = reviewer option 2: an explicit **inbox table**.
+  `submissions(id, kind ∈ {submit,cancel,retry}, payload_json, idempotency_key UNIQUE,
+  created_at, consumed_at NULL)`. The toolserver's **only write anywhere in the engine DB
+  is `INSERT INTO submissions`** (submit/cancel/retry endpoints all land there; `POST
+  /v1/jobs` 400-checks schema first). The engine consumes: ONE `BEGIN IMMEDIATE`
+  transaction — dedup `idempotency_key` against `idempotency_keys` (authoritative dedup
+  happens HERE, engine-owned; the toolserver pre-insert check is a best-effort read, never
+  a write) → `INSERT INTO queue` (+immutable job_spec snapshot) → `DELETE FROM submissions
+  WHERE id=?` (+ `UPDATE idempotency_keys…`) → commit; affected-rows checked;
+  `busy_timeout=5000 ms` + ≤3 bounded retries; persistent busy ⇒ honest `503`
+  (busy_timeout buys wait-time, **not fairness** — WAL admits one committer db-wide,
+  §8.4). **Transaction boundaries / crash windows:** inserted-not-yet-consumed ⇒ row
+  visible, engine retries (idempotent via key); consumed ⇒ queue row exists in the SAME
+  commit (half-consumed impossible); a queued job never double-executes because the sole
+  dispatcher transitions `queued→admitted` under `BEGIN IMMEDIATE` + affected-rows==1
+  (§8.2 guards). Reads (`GET /v1/jobs/{id}`, queue, ledger, gate) = read-only SQL
+  connections (WAL readers don't block the committer). Engine owns migrations
+  (`schema_migrations`, additive-only pre-M1 [P]) + weekly `PRAGMA integrity_check`
+  logged. Rejected alternatives (shared-table dual-writer = the r2 contradiction;
+  engine-internal enqueue HTTP = one hop removed but engine takes the public-API surface)
+  stay documented in OQ-6/ADR-D-08 for the reviewer.
 - **engine → tool containers:** `docker run` equivalents from `job_types` rows: image by
   digest, `--network none`, binds `heat-data/runs/<id>/work`, env allowlist, cpu/mem
   limits, GPU device + nvidia runtime only when class enabled (FR-18). Exit code + captured
@@ -856,8 +869,9 @@ and the p95 latency budget honest (NFR-04).
 `workflows/` files, tickets, and this ledger **are** the operational state (D-02: "workflow
 files = state"). Rules: (1) a ticket is *open* only if its file exists in
 `workflows/tickets/`; (2) progress claims are `claimed: <session>, <ISO time>` lines written
-**before** work (single-writer discipline — if two sessions see the same claim, the earlier
-timestamp wins, later yields); (3) completion = a ≤3-line done-check (what changed, how
+**before** work, and **only while holding the per-ticket flock (§8.8)** — mutual exclusion
+is the lock, not the timestamp (r3: the earlier "earlier timestamp wins" rule was prose
+convention with no enforcing mechanism); (3) completion = a ≤3-line done-check (what changed, how
 verified, cleanup attestation) + ledger row + commit (NFR-12 makes the attestation
 mechanical via CI lint); (4) machine state (queue, registry, run state.json) lives in
 heat-data; `workflows/` lives in the repo and is *human/agent-legible* — a session with zero
@@ -866,15 +880,15 @@ memory must be able to answer "what is in flight, what is next, what is blocked"
 
 ```mermaid
 stateDiagram-v2
-    [*] --> open: ticket file created (claimed line = single-writer)
-    open --> in_progress: claimed: session, ts (written BEFORE work)
+    [*] --> open: ticket file created
+    open --> in_progress: flock acquired + claimed line under lock (§8.8)
     in_progress --> in_progress: progress commits (ledger rows)
     in_progress --> blocked: blocker recorded in ticket file (why + unblock condition)
     blocked --> in_progress: unblocked (evidence appended)
     in_progress --> done: done-check <=3 lines + verification refs + cleanup attestation
     done --> [*]: commit + ledger row; ticket file remains (history, not state)
 ```
-*Diagram 5 — ticket lifecycle (the human-visible half of orchestration; D-02 state law).*
+*Diagram 5 — ticket lifecycle (the human-visible half of orchestration; D-02 state law; claim transitions enforced by the §8.8 flock).*
 
 > **Contract boundary (v1.1, FINDING-07 — one canonical contract):** HTTP status codes and
 > error bodies are canonized **only** in §7.2 (201 = FR-01 as revised in REQUIREMENTS v1.2;
@@ -888,7 +902,7 @@ stateDiagram-v2
 > transition row carries its owner + trigger; acceptance = T-02/T-12 assert exactly these
 > tables (the single source of truth).
 
-### 8.2 Job/run state machines (machine half; SQLite; per-table writers F4: toolserver owns `queue`, engine owns transitions — OQ-6 ADR-D-08 A1 pending)
+### 8.2 Job/run state machines (machine half; SQLite; **r3 ownership:** engine owns ALL queue writes — toolserver enqueues via the `submissions` inbox (§7.5/§8.4b); ADR-D-08 A1 still Proposed/OQ-6 pending)
 Job: `queued → admitted → running → {succeeded | failed | cancelled}`, plus
 `degraded-evidence` (physics done, evidence step blocked — §6.5) and `stale-lease` (crash
 recovery re-queues, §8.6). Run: `created → active → gate_pending → {succeeded | failed} →
@@ -914,12 +928,30 @@ records step boundaries (D-05 artifacts→state→ledger order visible in file t
 `journal/` sub-record).
 
 ### 8.4 Single-writer points (per-table; F4 disambiguation)
-SQLite WAL: engine = RW, toolserver = insert-only (busy_timeout). `workflows/`: claim-before-
+SQLite WAL: one committer db-wide; exact operation-level ownership in the §8.4b table (r3) — toolserver write path = INSERT on `submissions` only, engine = everything else (busy_timeout, bounded retry). `workflows/`: claim-before-
 work convention + git merges as backstop. heat-data run dirs: only the job container holds
 its run-dir RW bind during `running`; promote worker is sole MinIO writer; ledger: engine
 sole appender (agent edits go through tickets, not the ledger). Git: engine pushes; agent
 repo edits and engine ledger commits share the remote via fetch-rebase-retry loop (push
 contention = transient, retried; [P], reviewed at M0).
+
+#### 8.4b — SQLite operation-level write ownership (normative; r3)
+
+WAL admits **one
+committer db-wide at a time**; "ownership" below is an application *convention* that makes
+contention predictable — the DB does not enforce per-table writers, and no fairness is
+promised by `busy_timeout`.
+
+| Table | Writer process(es) | Operations | Transaction mode |
+|-------|--------------------|-----------|------------------|
+| `submissions` | toolserver: INSERT only · engine: DELETE on consume | submit/cancel/retry enqueue; consume | toolserver: 1-stmt autocommit; engine: BEGIN IMMEDIATE (with queue insert) |
+| `queue` | **engine only** (toolserver = read-only) | INSERT (from consume), `queued→admitted→running→terminal` updates | BEGIN IMMEDIATE + affected-rows==1 (§8.2 guards) |
+| `idempotency_keys` | **engine only** (authoritative dedup at consume) | INSERT/lookup inside consume txn | BEGIN IMMEDIATE |
+| `runs`, `job_types`, `gate_results`, `evidence_links`, `candidates`, `promotion_queue`, `reconcile_log`, `schema_migrations` | **engine only** | per-subsystem (§6) | BEGIN IMMEDIATE where multi-row |
+
+Read path: toolserver opens all of the above **read-only** (WAL readers coexist with the
+committer). Duplicate-job-execution prevention = single dispatcher + §8.2 conditional
+transitions (an executor that doesn't win the affected-rows check never runs the job).
 
 ### 8.5 Idempotency and replay
 Every mutation carries an idempotency key (§7.1); step exec re-check (FR-38): a step re-run
@@ -944,30 +976,60 @@ as-is; runner step-exec becomes framework activities; `workflows/` state law unc
 already running 3 stacks [V] — unjustified today; revisit at M2 review with T-07/T-02 stats
 as evidence.
 
-### 8.8 Concurrent agent sessions and ticket claims  [review §5.1 — added 2026-11-15]
-Multiple `he` clients are supported **at the API level** (SQLite WAL allows one writer
-DB-wide — §7.5 r2 correction). The gap the review found is *ticket*-level concurrency, which is
-an **agent-protocol** matter, previously asserted but not mechanized. Now specified:
-- **Claim protocol (r2 item 3 corrected):** an ordinary *write* of the ticket file is NOT a
-  CAS — read→modify→rename races (two sessions both pass the "no live claim" check before
-  either renames). The real mechanism is a **create-exclusive lockfile** — the filesystem
-  primitive with the required compare-and-set semantics:
-  `he ticket claim <id>` = `open("workflows/tickets/<id>.claim", O_CREAT|O_EXCL)` →
-  **exactly one** creator succeeds; losers get `EEXIST` → `409 already_claimed` (no TOCTOU:
-  O_EXCL creation is atomic on ext4 [V: POSIX]). The claim file holds
-  `{session_id, claimed_at, heartbeat_at}`; the ticket-file `claimed:` line is then appended
-  by the lock holder only (convenience projection; the lockfile is the arbiter). Release =
-  rename ticket → `done/` + unlink lockfile + ledger append (order: rename before unlink, so
-  a crash between the two leaves ticket unclaimed-but-done → reconcile treats done/ as truth).
-  **Stale-claim supersede** is also CAS: `O_TRUNC`-free `rename(lockfile, lockfile+".stale-<ts>")`
-  then re-`O_EXCL` — a superseder that loses the rename is an `EEXIST` loser like any other.
-- **Stale claims:** a claim whose lockfile `heartbeat_at` is older than the ticket's
-  heartbeat interval (default 30 min [P]) with no progress line is **stale**: any session may
-  supersede it via the CAS rename+re-`O_EXCL` sequence above + a ledger note. No lock daemon,
-  no lease service — the files are the arbiter.
-- **What is NOT promised:** no cross-session coordination of *work content* (two sessions
-  editing one design doc concurrently will conflict — git is the reconciliation layer,
-  human-in-the-loop), no priority queue fairness, no multi-operator RBAC (§10.2).
+### 8.8 Concurrent agent sessions and ticket claims  [review §5.1; **r3 rewrite: flock(2) held lock replaces the r2 O_EXCL/rename design** — §5.4b's "no lock manager" row still holds: a per-ticket advisory lock is a filesystem primitive, not a daemon]
+Multiple `he` clients are supported **at the API level**. Ticket-level concurrency is an
+**agent-protocol** matter and is mechanized here. **Why r2 was wrong (accepted finding):**
+atomic rename — and equally `O_CREAT|O_EXCL` creation — are *point* operations; neither is a
+lock. Nothing serialized a claimant's read→check→modify window (two sessions could both pass
+the "no live claim" check and both write replacements, last writer wins), and the r2
+supersede's rename-then-recreate carried its own unlink/recreate race. The r2 text also
+mislabelled these as "CAS" — retracted: an operation is only a CAS if applied under mutual
+exclusion. The mechanism now:
+- **flock protocol (normative):**
+  1. **Lock:** `open("workflows/tickets/.locks/<id>.lock", O_CREAT, 0o644)` then
+     `flock(fd, LOCK_EX | LOCK_NB)`, retrying with 100 ms backoff up to
+     `HE_CLAIM_WAIT_MAX` (default 5 s [P]). **Creating the file is not the arbiter;
+     acquiring the lock is.** Timeout while a holder exists ⇒ `409 already_claimed`; a loser
+     never reads or modifies the ticket.
+  2. **Critical section (all under the held lock):** read ticket → classify (fresh /
+     claimed-live / claimed-stale / done) → append the `claimed:` line to the ticket
+     (write→fsync) → append the ledger claim event → write claim payload
+     `{session_id, pid, claimed_at, heartbeat_at, status}` → release. No ticket read or
+     mutation ever happens outside the lock (payload is informational; flock arbitrates — so
+     a crash mid-section is recoverable, not corrupting).
+  3. **Lock-file location/permissions:** `workflows/tickets/.locks/` (same ext4 owner/D-05
+     root, dir 0755 / file 0644, single HE user [A2]).
+  4. **Process-crash behavior:** flock is bound to the fd and **released by the kernel on
+     process death** (any exit or signal). No unlink protocol, no stale-lock sweep, no
+     delete/recreate race — a leftover lock *file* with a dead holder is simply unlocked.
+  5. **Heartbeat/expiry:** holder rewrites `heartbeat_at` every 60 s [P,
+     `HE_HEARTBEAT_SEC`]; a claim is *stale* when `heartbeat_at` older than
+     `HE_CLAIM_STALE_MIN` (default 30 min [P]) **and** no holder currently has the lock
+     (detection = `LOCK_EX|LOCK_NB` succeeds, then re-verify staleness inside). A hung-but-
+     alive holder keeps the lock **by design** (mutual exclusion excludes zombies too); ops
+     path = deliberate `kill` of the pid named in the payload, after which the kernel
+     releases and supersede proceeds.
+  6. **Stale-claim supersede, under the held lock:** acquire → re-verify staleness (two
+     superseders cannot both be inside; the flock loser waits or times out with 409) →
+     ledger note `superseded: <old session> @ <ts>` → write own claim → release. **No
+     rename acts as arbiter anywhere in this design.**
+  7. **Completion:** under the lock: done-check lines + rename ticket → `done/` (rename is
+     the atomic *replace* of ticket state, not the arbiter), ledger append, payload
+     `status=done`, release. Crash between rename and release ⇒ ticket done + lock
+     free — consistent (done/ is truth, §8.1).
+  8. **Filesystem/host assumptions:** one host [A2], `workflows/` on **local ext4** — flock
+     has no valid semantics over NFS/9p; preflight **asserts** this (`stat -f`) and fails
+     closed if the repo root is ever remoted. Design requirement to verify at M0, not an
+     asserted fact.
+  9. **Bounded wait:** lock acquisition is bounded (`HE_CLAIM_WAIT_MAX`); exhaustion =
+     clean `409` + hint naming holder pid + heartbeat age — never a hang, never a silent
+     proceed.
+- **What is NOT promised:** no cross-session coordination of *work content* (git + human
+  reconcile), no priority fairness, no multi-operator RBAC (§10.2), no cross-host claims
+  (single host, [A2]).
+- **Concurrency tests:** claim race = **T-20** (≥2 independent processes, fresh ticket,
+  exactly one winner; 10× repetition), supersede + crash + retry = **T-21**, duplicate-
+  execution/crash-windows = **T-23** (REQ §4). [P — designed, not run]
 
 ---
 
@@ -1279,7 +1341,7 @@ work). Read paths (status/candidates) see bursts of agent polling (~1 req/30 s/s
 1. **GPU: 1 concurrent job, by ruling** — GPU throughput is *capped by policy*, not tuned;
    class is off anyway until C6 (FM-5). 2. **CPU class: N cores ÷ MAX_CONC_CPU** — queueing
    theory is the design (FIFO + priority tie-break; no fancy scheduling claimed). 3. SQLite
-   WAL single-writer: insert-only toolserver path keeps write contention trivial at this
+   WAL single-committer db-wide: the submissions-inbox write path (§7.5 r3 — toolserver INSERT-only, engine sole queue writer) keeps write contention trivial at this
    volume; the known ceiling (≈single-digit thousands writes/s local WAL) is ~3 orders above
    load — revisit trigger: >50 submissions/s sustained (never expected; F-2 = postgres trip
   _wire, recorded not acted). 4. heat-data I/O: solver I/O stays in run work dirs on ext4

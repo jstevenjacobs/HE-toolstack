@@ -1,6 +1,6 @@
 # HE-toolstack Architecture Decision Register (ADR)
 
-**Document:** `HE-TOOLSTACK-ADR.md` · v1.3 (rev 2026-11-15b: review-response 2 — D-15 probe-matrix correction [V re-probe 15b], D-16 points at TD §6.2b normative API; prior v1.2: response 1 — D-01/D-08/D-14 A1, +D-15…D-18; prior v1.1: +D-14 backup root) · 2026-11-14
+**Document:** `HE-TOOLSTACK-ADR.md` · v1.4 (rev 2026-11-16 r3: ADR-D-08 A1 reworded to the submissions-inbox model (r2 per-table split withdrawn as self-contradictory); OQ-6 synced. Prior rev 2026-11-15b: review-response 2 — D-15 probe-matrix correction [V re-probe 15b], D-16 points at TD §6.2b normative API; prior v1.2: response 1 — D-01/D-08/D-14 A1, +D-15…D-18; prior v1.1: +D-14 backup root) · 2026-11-14
 **Status:** Living register (Phase 2 deliverable B of DesignStandards §8). Updates are ledger-
 backed commits; superseded ADRs stay visible with status `Superseded by …`.
 **Companion:** `HE-TOOLSTACK-TECHNICAL-DESIGN.md` §17 summarizes this register; requirement
@@ -195,24 +195,35 @@ Decision provenance classes, stated up front because reviewers must be able to a
 
 ### ADR-D-08 — One SQLite (run registry + queue + lease-state) co-located with the workflow engine
 - **Status:** Proposed (sign-off needed)
-- **Decision/rationale:** WAL-mode SQLite is the minimum durability primitive that already
+- **Decision/rationale (r3 status note: stays Proposed until the A1 model below is explicitly accepted
+  by reviewer/operator):** WAL-mode SQLite is the minimum durability primitive that already
   exists in the runtime; three stores (queue + registry + lease) would triple the
   consistency problem D-05 just collapsed. Contention at single-operator write rates is
   negligible [P]. Alternatives: Postgres (extra service to operate, deferred — compose
   profile exists for it), separate queue (Redis — rejected: durability requires AOF
   gymnastics SQLite gives by default).
-- **Amendment A1 (2026-11-15, FINDING-04, GitHub #5 — proposed resolution of OQ-6; reviewer
-  verdict requested, not assumed):** the phrase "single writer" is retired. Model = **one
-  writer per table; two permitted writer processes** (all connections WAL mode, busy_timeout
-  5 s [P]): **toolserver** = sole writer of `queue` + `idempotency_keys`; **workflow-engine** =
-  sole writer of `jobs` transitions, `candidates`, `runs`, `gate_results`, `promotion_queue`,
-  `reconcile_log`, `schema_migrations`. Queue submission = single-row commit (atomic by
-  definition); claim = `UPDATE queue SET state='claimed',worker=? WHERE id=? AND
-  state='queued'` + `changes()==1` check inside one transaction (WAL serializes at commit —
-  exactly one winner). toolserver opens jobs/registry read-only. Engine owns migrations +
-  boot `PRAGMA quick_check`; `integrity_check` weekly on the backup copy (§6.9). Rejected B:
-  toolserver→engine internal enqueue API (adds a hop-and-failure mode on the submit path and
-  makes queue submission hostage to engine liveness, against the FINDING-06 degraded posture).
+- **Amendment A1 (r3 rewrite, 2026-11-16 — reviewer round-3 finding accepted; proposed
+  resolution of OQ-6; reviewer/operator verdict required, not assumed):** the r2 model
+  ("one writer per table; toolserver sole writer of `queue` + `idempotency_keys`") was
+  **internally contradictory** — TD §7.5 simultaneously granted the engine an
+  `UPDATE queue SET state='claimed'…` operation, so two processes wrote `queue` while two
+  other sections asserted per-table single-writer. Withdrawn. **Model now (reviewer option
+  2, explicit inbox):** toolserver's *only* write anywhere in the engine DB is `INSERT INTO
+  submissions(id, kind, payload_json, idempotency_key UNIQUE, …)`; the engine consumes each
+  row in ONE `BEGIN IMMEDIATE` transaction — dedup `idempotency_key` against
+  `idempotency_keys` (authoritative dedup at consume), `INSERT INTO queue` (+immutable
+  job_spec), `DELETE` the consumed submission — commit; and is the **sole writer of every
+  other table including `queue`** (transitions: `BEGIN IMMEDIATE` + affected-rows==1
+  conditional updates). WAL admits **one committer db-wide**; ownership is an application
+  convention the DB does not enforce; `busy_timeout` (5 s) buys wait-time, **not fairness**
+  — bounded retries, then honest `503`. Crash windows: submission-not-yet-consumed ⇒
+  replay-safe via key; consumed ⇒ queue row exists in the same commit (half-consumed
+  impossible); duplicate execution prevented by single dispatcher + conditional
+  transitions. Normative table: TD §8.4b; API path: TD §7.5. Rejected B (engine-internal
+  enqueue API) unchanged: adds a hop + engine-liveness hostage on the submit path (against
+  the FINDING-06 degraded posture). Rejected C (r3): dual-writer ON `queue` itself with
+  operation-level ownership — deliberately NOT accepted: no benefit over the inbox at equal
+  WAL contention, and it keeps the contradiction surface.
 - **Revisit:** fleet or >1 writer → Postgres profile flips on. **Refs:** FR-30/33, NFR-02;
   P1 §5 D-08.
 
@@ -350,7 +361,7 @@ Decision provenance classes, stated up front because reviewers must be able to a
 | OQ-3 | Migration stance detail: PD-toolstack evidence repos stay frozen (user ruling says source-of-information only — confirm *read-only mirror* vs *do-not-touch* for the copy-into-registry step, ticket C3). | C3 execution |
 | OQ-4 | physics-gate endpoint wrapper (D-06) and registry/SQLite colocation (D-08) acceptance. | M0 design freeze |
 | OQ-5 | Job spawn channel. **Decision request ADR-D-16 filed 2026-11-15 (FINDING-03, GitHub #4): recommendation = Option B hardened spawn-sidecar (socket never leaves its container; engine reaches only a 4-method HTTP API; allow-list enforces image pins, network=none, cap-drop, cpuset/mem, masked mounts). Honestly stated: a sidecar is privilege REDISTRIBUTION, not removal — a compromised sidecar is still root-equivalent on the host; what shrinks is the attack surface (4 audited methods vs the whole daemon API) for the container that also holds git PATs and user code. Option A rejected for that reason; Option C rejected for splitting one compose app (D-01). Operator decision required — nothing assumed.** | M0 build start |
-| OQ-6 | **Proposed resolution filed 2026-11-15 as ADR-D-08 Amendment A1 (FINDING-04, GitHub #5):** shared-DB per-table dual-writer (toolserver writes only queue+idempotency_keys; engine owns everything else; atomic claim via single-statement UPDATE...WHERE state='queued'), Option B (engine enqueue API) rejected with reasons. **Reviewer verdict still required — status Proposed, not Accepted.** | design freeze |
+| OQ-6 | **Proposed resolution re-filed 2026-11-16 (r3) as ADR-D-08 Amendment A1:** shared-DB with explicit **submissions inbox** — toolserver INSERT-only on `submissions`; engine sole writer of `queue` + everything else; consume under `BEGIN IMMEDIATE` (r2 per-table dual-writer WITHDRAWN — TD §7.5's engine-side queue UPDATE contradicted it). Option B (engine enqueue API) and option C (dual-writer on `queue`) rejected with reasons. **Reviewer/operator verdict required — status Proposed, not Accepted.** | design freeze |
 | OQ-7 | **Bind topology** — D-15 (published `127.0.0.1:` ports + gateway-URL clients). Probe matrix (TD §5.4b) shows v1.0 loopback-only publish unreachable from containers, and the Ollama isolation premise in the pre-r2 text is factually false today (host bind `0.0.0.0:11434` [V 15b]). Operator accept required; do not assume approval. | agent reachability vs host-service exposure | operator (Steven) | design freeze |
 
 ---
