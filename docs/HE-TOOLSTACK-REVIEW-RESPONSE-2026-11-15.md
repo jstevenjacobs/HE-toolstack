@@ -69,3 +69,123 @@ being (a) operator rulings D-15/D-16, (b) C6 GPU re-measure before any GPU-class
 enablement, (c) the three independent human sign-offs required for design freeze.
 Self-approval of this response is not approval: per review §10 the package now **stops
 here for human review**.
+
+---
+
+# Appendix B — Round-2 response (2026-11-16): "Changes requested" dispositions
+
+Review received: **CHANGES REQUESTED — NOT APPROVED FOR MERGE** (8 required corrections,
+overall direction accepted). This appendix dispositions each correction against commit
+`3feb698` on `review/architecture-revisions`. Re-run verification: 21/21 documentation
+integrity gates (`gates_v13.py`) + all 9 diagrams parse (mermaid 12.3.0); documentation
+checks only — **not** runtime validation. No deployment or implementation activity
+performed.
+
+## Correction 1 — Lifecycle requirements
+**Done.** NFR-01 (REQ v1.4) now states the canonical rule: `make down` is the *only* stop
+path for stack-owned containers; `docker compose down` is permissible solely as the
+class-C/class-J ownership command invoked *through* the Makefile, never as an operator-
+parallel path. Container labels (`com.docker.compose.project=he`, run-scope `he.run=<id>`)
+standardized in TD §5.6 (lifecycle narrative + sequence diagram 7 re-verified). Shutdown
+semantics, ownership classes, and labels use one vocabulary across REQ §2.1, TD §5.6/§11.
+
+## Correction 2 — Network security (the substantive one)
+**Done, with a retraction and a stronger design.**
+- *Contradiction removed:* the old text claimed `host.docker.internal` was refused while
+  `172.17.0.1` was the path. Both were wrong for this environment. Probe [V 2026-11-16,
+  reproduced in-container and in WSL2]: from a default-bridge container **both**
+  `172.17.0.1` and `host.docker.internal` (= `192.168.65.254`) traverse to host-published
+  listeners; `127.0.0.1` inside the container is its own loopback (refused). Host Ollama
+  bind re-verified `*:11434` [V ss]. All contradictory statements in REQ/ADR/TD are
+  retracted and replaced by the probe matrix; D-15's old "isolation premise" is explicitly
+  retracted in its record.
+- *Accessibility demonstrated:* proposed mechanism (D-15 rev, still **operator-pending**):
+  dedicated isolated network `he-agent` — toolserver joins it and **publishes no port**;
+  only the Hermes agent container joins it. Verified by live probes on the host engine
+  [V 2026-11-16]: (a) member→member service-DNS HTTP 200; (b) default-bridge peer probe of
+  `toolserver:8100` **fails — no path**; (c) non-member probe of the *loopback-published*
+  port via `172.17.0.1:8100` **connects** — which disproves "loopback publish = container
+  isolation" (the gateway alias reaches published ports indiscriminately). That negative
+  result is exactly why the design is membership, not bind-prefix alone: bind `127.0.0.1:`
+  remains as host-firewall hygiene (blocks LAN/WAN), he-agent membership is the container
+  control.
+- *Reviewer's exact test is specified as the gate:* T-15/T-21 = another container on the
+  same default bridge MUST fail to reach the toolserver; Ollama embed-side gets its own
+  dedicated service network; host CLI health path keeps the loopback-only publish (host
+  cannot route into dedicated nets [V probe], so both paths are needed).
+- D-15 remains an **open operator decision** (options A–D, recommendation D); no approval
+  assumed. Pre-deployment re-probe on the deployment host is a stated condition (this was
+  proven on a WSL2/5.15 host; production is RTX-5060-Ti WSL2).
+
+## Correction 3 — Workflow concurrency
+**Done.** §8.8's "atomic rename ≈ CAS" was withdrawn as unsound (rename mutualizes the
+*file*, not the transition — two sessions can both observe `open` before either renames).
+TD §8.8 now specifies the real arbiter: `open(…, O_CREAT|O_EXCL)` lockfile claim (kernel-
+enforced single winner) **plus** the SQLite transition guarded as compare-and-swap —
+`BEGIN IMMEDIATE` + `UPDATE tickets SET status='claimed'… WHERE id=? AND status='open'`
+with rowcount==1 verification (SQLite has no CAS primitive; this is the CAS *pattern*,
+stated as such, not claimed as a primitive). §8.8a adds the honest WAL caveat (correction
+7). Test **T-20** defined + matrixed: N≥8 concurrent claimants on one ticket → exactly one
+rowcount==1 winner, others 409 [P — test defined, not executed].
+
+## Correction 4 — Backup integrity
+**Done.** `mc mirror` documented as NOT preserving MinIO version history (known gap,
+[D]); TD §6.9 now specifies the actual mechanism: versioned objects exported to an
+ext4 staging manifest-digest set (`sha256sum -c` verified), staged set → OneDrive via
+robocopy per D-14, receipt (counts+digests) committed to the ledger repo; OneDrive
+FinalItems V1 shadow-copy remains an additional, non-authoritative layer [V mechanism
+exists; drill T-22 P]. Active-job policy reconciled with T-11: queue DB is WAL-snapshotted
+(hot copy), and T-11's abort/restart semantics apply to a *transfer* interrupted mid-flight
+— the two tests no longer contradict.
+
+## Correction 5 — Diagrams
+**Done.** All 9 TD diagrams now depict the revised architecture: he-agent isolated network
++ zero publish (diagrams 1/3), spawn-sidecar holding docker.sock with he-internal-only
+reach (1/3/6), host engine socket via sidecar (5), `make down` shutdown + run labels (7),
+O_EXCL claim path (state diagram re-checked). Verified: **9/9 parse under mermaid
+12.3.0 + jsdom 31** (real parser; earlier headless failures were harness artifacts).
+Superseded `host.docker.internal`-as-trust-boundary edges removed.
+
+## Correction 6 — Spawn-sidecar interface
+**Done.** One normative spec: TD §6.2b — `POST /v1/spawn` (`create_run`),
+`GET /v1/runs/{id}` (`status`), `POST /v1/runs/{id}/kill`, `GET /v1/runs/{id}/logs` —
+4 ops, JSON, no auth (network membership = the control). ADR-D-16 and QA Q14 now point at
+§6.2b as the single source; every other mention is prose referring to it. Stale alias
+sweep (`POST /spawn`, bare `run/status/kill/logs` verb-lists, `run`+`status` combined path)
+= 0 residual tokens across all five docs (gate Q14).
+
+## Correction 7 — SQLite concurrency
+**Done.** TD §8.8a (new): table-level writer ownership (D-08 A1) is explicitly
+an **application convention**, not DB enforcement — any holder of the DB file can write
+any table; the rule holds only via code discipline + CI lint test (T-19 [P]). WAL is
+stated correctly: a **single writer for the whole database at a time** (db-wide
+serialization), readers non-blocking; the old "commit-time serialization per table" and
+any fairness implication is corrected — WAL has **no fairness guarantee**, a writer
+re-acquires immediately; documented ceiling + escalation path (per-DB files) retained.
+
+## Correction 8 — Documentation traceability
+**Done.** QA report v1.3 + DESIGN-REVIEW v1.2 resynced to this exact tree: stale counts
+removed (22 T-ids T-01…T-22, 17 ADR records, 136 [V]/[E]/[P] tags, OQ-1…OQ-7 — OQ-1 row
+restored in TD §17.1, and gate found+removed a dangling ref to a non-existent record
+— the phantom D-13 was a PD-ledger row number, not an ADR). **T-12 disambiguated:** T-12 =
+process-write-audit only; concurrent-claim-race is its own test **T-20**, digest-chain is
+T-04/T-10 — stated in REQ v1.4, every T-12 cite checked. New rows Q18–Q22 record the
+round-2 gates.
+
+## Additional expectations — compliance
+- All 14 preserved decisions untouched (single compose, separate images D-10, backup root
+  D-14, heat-data authority D-05, CPU-only acceptance, physics gate, state-as-files…).
+- **D-15/D-16 remain operator decisions** — records say "operator-pending", recommendations
+  flagged as recommendations, no approval assumed.
+- No GPU execution enabled; GPU admission stays disabled pending HW verification; no
+  resource-sharing change.
+- Zero implementation/deployment activity this round (design docs only; probes were
+  throwaway containers on the host engine, removed — no stack deploy).
+- Proposed-vs-verified discipline maintained; new claims carry [V]/[P]/[D] tags.
+- Documentation QA re-run (21/21 gates + parser) **is stated as documentation integrity
+  only**; QA report header says runtime validation remains outstanding.
+
+## Disposition
+All 8 corrections addressed in `3feb698`. **STOP per §10 of round-1 protocol remains in
+force:** nothing merged, nothing implemented, nothing deployed; awaiting human re-review
+of PR #11.
