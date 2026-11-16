@@ -1,6 +1,6 @@
 # HE-toolstack Architecture Decision Register (ADR)
 
-**Document:** `HE-TOOLSTACK-ADR.md` · v1.2 (rev 2026-11-15: architecture-review response — D-01 A1, D-08 A1, D-14 A1, +D-15…D-18, OQ table updated; prior v1.1: +D-14 backup root) · 2026-11-14
+**Document:** `HE-TOOLSTACK-ADR.md` · v1.3 (rev 2026-11-15b: review-response 2 — D-15 probe-matrix correction [V re-probe 15b], D-16 points at TD §6.2b normative API; prior v1.2: response 1 — D-01/D-08/D-14 A1, +D-15…D-18; prior v1.1: +D-14 backup root) · 2026-11-14
 **Status:** Living register (Phase 2 deliverable B of DesignStandards §8). Updates are ledger-
 backed commits; superseded ADRs stay visible with status `Superseded by …`.
 **Companion:** `HE-TOOLSTACK-TECHNICAL-DESIGN.md` §17 summarizes this register; requirement
@@ -351,6 +351,7 @@ Decision provenance classes, stated up front because reviewers must be able to a
 | OQ-4 | physics-gate endpoint wrapper (D-06) and registry/SQLite colocation (D-08) acceptance. | M0 design freeze |
 | OQ-5 | Job spawn channel. **Decision request ADR-D-16 filed 2026-11-15 (FINDING-03, GitHub #4): recommendation = Option B hardened spawn-sidecar (socket never leaves its container; engine reaches only a 4-method HTTP API; allow-list enforces image pins, network=none, cap-drop, cpuset/mem, masked mounts). Honestly stated: a sidecar is privilege REDISTRIBUTION, not removal — a compromised sidecar is still root-equivalent on the host; what shrinks is the attack surface (4 audited methods vs the whole daemon API) for the container that also holds git PATs and user code. Option A rejected for that reason; Option C rejected for splitting one compose app (D-01). Operator decision required — nothing assumed.** | M0 build start |
 | OQ-6 | **Proposed resolution filed 2026-11-15 as ADR-D-08 Amendment A1 (FINDING-04, GitHub #5):** shared-DB per-table dual-writer (toolserver writes only queue+idempotency_keys; engine owns everything else; atomic claim via single-statement UPDATE...WHERE state='queued'), Option B (engine enqueue API) rejected with reasons. **Reviewer verdict still required — status Proposed, not Accepted.** | design freeze |
+| OQ-7 | **Bind topology** — D-15 (published `127.0.0.1:` ports + gateway-URL clients). Probe matrix (TD §5.4b) shows v1.0 loopback-only publish unreachable from containers, and the Ollama isolation premise in the pre-r2 text is factually false today (host bind `0.0.0.0:11434` [V 15b]). Operator accept required; do not assume approval. | agent reachability vs host-service exposure | operator (Steven) | design freeze |
 
 ---
 
@@ -361,38 +362,58 @@ they change security-relevant exposure and privilege and are explicit operator d
 requests (review §7). D-17/D-18 are contract/semantics corrections inside author authority,
 marked Proposed pending the independent review.
 
-### ADR-D-15 — Toolserver bind topology: compose-network bind + host loopback publish, agent reaches host via gateway IP (FINDING-01)
-- **Status:** Proposed — **operator approval required** (network-exposure change class). **Date:** 2026-11-15.
-- **Context (measured 2026-11-15, not assumed):** the Hermes agent container runs
-  `NetworkMode=bridged` on Docker-default with internal netns `172.17.0.0/24`
-  (container IP 172.17.0.2). Probes **from inside the running agent container**: connect to
-  `127.0.0.1:PORT` → refused (its own namespace, [V]); connect to `host.docker.internal`
-  (192.168.65.254) → **refused** — desktop-Docker's host alias does not traverse to WSL2's
-  real host [V]; connect to the NAT gateway `172.17.0.1` → **REACHABLE** (TCP connect
-  succeeded to a host listener bound 127.0.0.1… this proves host-side loopback listeners are
-  reachable from the container via the gateway IP on WSL2's kernel — the documented
-  `host.docker.internal` path is NOT). Therefore the client URL
-  `http://127.0.0.1:8100` in v1.0 §5.1/§6.4 is **wrong for the agent** (FINDING-01 VALID):
-  loopback is per-namespace.
-- **Options:** (A) agent `network_mode: host` — rejected: puts the agent on every host
-  interface and violates D-09 boundary. (B) join the agent to the compose network — rejected:
-  violates NFR-07 (other containers must not reach toolserver). (C) **toolserver service binds
-  `8100` on the compose-internal interface only; compose publishes `127.0.0.1:8100:8100` for
-  host/CLI use; the agent client URL becomes `http://172.17.0.1:8100` (WSL NAT gateway,
-  resolved at container start via `ip route | awk '/default/ {print $2}'`, env
-  `HE_API_BASE` override).** WSL2's docker-engine NAT lets the container reach the host's
-  published loopback binding, verified [V]; the port is NOT exposed on LAN interfaces
-  (firewall posture unchanged: nothing stack-related binds 0.0.0.0; §6.4 host-allowlist rule
-  still applies to the published port). (D) dedicated `he-agent` docker network joining only
-  agent+toolserver with toolserver bound there — viable and cleaner long-term, deferred: adds
-  a second network object whose WSL2 routing behavior the agent's *existing* bridge already
-  satisfies; revisit at M0 only if C's gateway probe fails on re-check.
-- **Consequences:** D3 gains the agent netns; the connectivity acceptance test runs **inside
-  the agent container** (never host-side curl): `he doctor` asserts `GET ${HE_API_BASE}/healthz`
-  200 from inside Hermes AND that a *different* stack container cannot reach 8100 (NFR-07
-  witness stays). Bind-address requirement is normative in §6.4: compose `ports:
-  ["127.0.0.1:8100:8100"]` (never bare `"8100:8100"` — that binds 0.0.0.0).
-- **Refs:** FINDING-01 (GitHub #2), NFR-07, NFR-16, FR-01…08, D3; ADR-D-09/D-13 unchanged.
+### ADR-D-15 — Toolserver reach topology: dedicated `he-agent` network, ZERO published ports (FINDING-01; review round-2 item 2)
+- **Status:** Proposed — **operator approval required** (network-topology change class). **Date:** 2026-11-15; rewritten 2026-11-16 after the r2 probes below invalidated the earlier draft.
+- **Context (all measured, never assumed):** the Hermes agent container runs on Docker-default
+  bridge, netns `172.17.0.0/24`. Measured facts that the design must respect:
+  1. Agent's own `127.0.0.1:8100` → refused (per-netns loopback — the v1.0 client URL was wrong, FINDING-01) [V 2026-11-15].
+  2. A port published `127.0.0.1:` on the host IS reachable from **any** container on the engine
+     via the gateway alias (`host.docker.internal`/`192.168.65.254`): same-engine listener
+     published loopback-only was hit from an unrelated throwaway container [V 2026-11-16
+     probe: 127.0.0.1:8197 published → foreign container → gateway alias **REACHABLE**;
+     unused control port refused]. **Loopback publishing therefore provides host/LAN exposure
+     control, NOT container isolation** — the earlier draft's claim that same-bridge access
+     "rests on the published-loopback bind holding" as an isolation property is **retracted**.
+  3. Both `172.17.0.1` and `host.docker.internal` traverse to host listeners from this
+     container (rev-a's `hdi refused` reading did not reproduce; retracted, see §5.1 TD) [V].
+- **Options:** (A) agent `network_mode: host` — rejected: agent on every host interface,
+  violates D-09. (B) join agent to the compose project default network — rejected: puts the
+  agent beside workflow-engine/MinIO, violates NFR-07 direction. (C) toolserver published
+  `127.0.0.1:8100:8100` + agent client via gateway IP — **superseded by this revision**: probe
+  fact 2 shows any unauthorized container reaches it the same way Hermes does, so it fails the
+  reviewer's negative requirement by construction. (D) **RECOMMENDED — dedicated
+  `he-agent` compose network whose only members are the toolserver service and the Hermes
+  agent container; toolserver publishes NOTHING for 8100.** Agent is joined once by the
+  operator: `docker network connect <project>_he-agent <hermes-container>` (manual connects do
+  not survive agent recreation — re-run after re-creation; `he doctor` checks membership and
+  re-runs both probes). Client URL `http://toolserver:8100` via network service DNS,
+  `HE_API_BASE` override retained.
+- **Demonstration (review r2 item 2 — both directions MEASURED 2026-11-16 on the real engine,
+  [V]; equivalents of production names used, throwaway objects removed after):**
+  - *authorized:* container multi-homed default-bridge + `docker network connect r2net`
+    (equivalent of `he-agent`) → `r2svc:8100` service DNS → TCP connect OK, **HTTP GET 200**.
+  - *unauthorized (fresh container, default bridge):* service name unresolvable (`gaierror`),
+    gateway alias :8100 → **refused** (nothing published), `172.17.0.1:8100` → **refused**.
+    Isolation is structural: there is NO route from a non-member to the port at all — it does
+    not depend on a bind flag staying correct.
+  - *host-side note (measured):* the WSL host does not route to dedicated-net container IPs
+    [V probe: host curl to 172.31.77.2:8100 failed], so host operator health/CLI uses
+    `make health` = `docker run --rm --network <project>_he-agent <curl-image> http://toolserver:8100/healthz`
+    — consistent with existing doctrine that host-side curl was never the acceptance test
+    (F1/T-15).
+- **Consequences:** §5.3/§5.4b/§6.4/§7.1/§11.3 carry mechanism D: compose gains top-level
+  `he-agent` network (in-project — the single-compose-project constraint holds); preflight
+  asserts **no `:8100` listener exists on the host at all** (strictly stronger than the old
+  "bare publish is a failure" rule); §10.2's "loopback = control" reframes to "**network
+  membership = control**" (still no HTTP auth — the boundary is now unambiguously the docker
+  network ACL, and Docker-desktop-managed vs manual-connect DNS behavior is covered by the
+  probe, not assumed). Residual, documented honestly: MinIO's operator-only published
+  `127.0.0.1:9000/9001` ARE gateway-reachable from any engine container [V probe fact 2] —
+  accepted residual, credential-gated, revisit if NFR-07 scope widens; the Ollama `*:11434`
+  corrective (bind `127.0.0.1`, operator action) stands on its own merits since gateway-path
+  reach is measured fact. T-15/T-17 carry both probe directions (positive 200 from member,
+  triple-refusal from non-member) as the acceptance test.
+- **Refs:** FINDING-01 (GitHub #2), review round-2 item 2, NFR-07, NFR-16, FR-01…08, D3; ADR-D-09 unchanged.
 
 ### ADR-D-16 — Job-spawn privilege: scoped spawn-sidecar (Option B hardened) — operator decision requested (FINDING-03 / OQ-5)
 - **Status:** Proposed — **operator decision required, explicitly not assumed.** **Date:** 2026-11-15.
@@ -403,7 +424,8 @@ marked Proposed pending the independent review.
     (any image, any mount incl. `/`, privileged, escape). Auditability: daemon logs only, no
     semantic log. Enforceability: none at the caller.
   - **B. Dedicated spawn-sidecar holding the socket; engine calls a 4-method HTTP API
-    (`create_run`, `status`, `kill`, `logs`) over the `he-internal` network.** Honest framing
+    (`create_run`, `status`, `kill`, `logs` — HTTP paths + payload schemas normative in TD §6.2b,
+  the single definitive spec) over the `he-internal` network.** Honest framing
     (per the review's warning): **this is privilege redistribution, not elimination** — a
     compromised sidecar is still root-equivalent on the host. What genuinely shrinks: the
     attack surface reachable from the two containers that execute untrusted user code and

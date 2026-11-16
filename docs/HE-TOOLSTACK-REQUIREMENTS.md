@@ -1,6 +1,6 @@
 # HE-toolstack Requirements Baseline
 
-**Document:** `HE-TOOLSTACK-REQUIREMENTS.md` · v1.3 (rev 2026-11-15b: review-response 2 — NFR-07 client URL corrected to bridge-gateway form [V probe], T-17/18/19 added; v1.2: FR-01/NFR-07/NFR-10/NFR-22 revised, NFR-23/24 added per FINDING-01/02/05/06/07; +NFR-22 v1.1 D-14) · 2026-11-14
+**Document:** `HE-TOOLSTACK-REQUIREMENTS.md` · v1.4 (rev 2026-11-15b: review-response 2 — FR-26 claim arbiter upgraded to O_EXCL lockfile (TD §8.8 r2); NFR-01 `make down` single-stop-path; NFR-07/T-15 alias facts corrected [V re-probe 15b]; T-20 claim-mutex + T-21 stale-claim + T-22 MinIO-version tests added; T-12 disambiguated; prior v1.3: NFR-07 gateway URL, T-17/18/19; prior v1.2: FINDING-01…07 revisions; +NFR-22 v1.1 D-14) · 2026-11-14
 **Status:** Baseline for review (Phase 2 deliverable C of DesignStandards §8)
 **Upstream sources:** Phase 1 report (`docs/PHASE1-ARCHITECTURE-DISCOVERY.md`, commit `141249d`)
 §2–§5; PD-toolstack `STACK-DESIGN-v3.md` (v3.8.1) and `STACK-AS-BUILT.md` (D-ledger D1–D27);
@@ -170,7 +170,7 @@ existing solver images.
 
 | ID | Description | Pri | Rationale / refs | Verification | Acceptance criteria |
 |----|-------------|-----|------------------|--------------|---------------------|
-| NFR-01 | `make down` (or `docker compose down`) leaves **zero** stack containers running or exited-owned-by-project; restart via `make up` re-creates the full stack with no manual steps. | P0 | [U→V pending M0] user observation "single compose app"; C4 orphan lesson | T-13 | `docker ps -a --filter label=he-project` empty after down; up→healthy from cold clone |
+| NFR-01 | **Canonical lifecycle (2026-11-15r2):** every stack container — compose-managed (class C) *and* spawned one-shots (class J) — carries label `he-stack=1` (compose `labels:` / sidecar spawn `--label`; class J also `he-run=<id>`). **`make down` is the controlled shutdown**: engine graceful stop → `docker compose down` → janitor sweep; it must leave **zero** `he-stack=1` containers (classes C∪J). A raw `docker compose down` is an operator escape hatch: it removes only class C by design; class-J disposition is healed by janitor + reconcile-on-start (§6.10) at next `make up`. `make down` is the **acceptance target**; raw compose-down is never the acceptance criterion. Restart via `make up` re-creates the full stack, no manual steps. | P0 | [U→V pending M0] user observation "single compose app"; C4 orphan lesson; r2-review item 1 | T-13 | after `make down`: `docker ps -a --filter label=he-stack=1 -q` empty **and** `docker compose ps -a` empty; up→healthy from cold clone |
 | NFR-02 | Queue and registry (SQLite) survive engine/container restart without job loss (FR-37); SQLite opened in WAL mode. | P0 | [P]; standard SQLite durability mechanism | T-05 | Kill -9 engine mid-queue; on restart, queue set identical to pre-kill snapshot |
 
 ### 3.2 Performance
@@ -261,17 +261,24 @@ URL. Auth deferred behind this boundary and documented as deferred (tech design 
 | T-08 | API contract suite (OpenAPI fixtures, idempotency, error envelope) | contract | FR-01/02/03/04/05/30/31/39 |
 | T-09 | Per-tool smoke fixtures (gmsh CLI determinism, OpenFOAM cavity, ccx plate, CoolProp probes, agentcad export, envelope refusal, p95 latency under load) | integration | FR-08/11/12/13/14/15, NFR-04 |
 | T-10 | Registry + history tests (lifecycle, bidirectional links, legacy D2 digest probe) | integration | FR-31/32/33/34 |
-| T-11 | MinIO promote + versioning restore drill | ops drill | FR-29, NFR-17 |
+| T-11 | MinIO promote + versioning **count-diff** + restore drill; **and** the §6.9 full backup taken **while jobs run** via `--allow-active` (r2 scope: reconciles the default refuse policy — the load backup is *this drill's explicit exception*, recorded with `active_jobs_at_start`), restoring the full §6.9 sequence and verifying ext4-staging → OneDrive-destination transfer integrity (step-5 read-back) | ops drill | FR-29, NFR-17, NFR-22 |
 | T-12 | Ticket/cleanup discipline audit (done-check attestation, scratch sweep) | process | FR-26/40, NFR-12 |
+
+> **ID disambiguation (r2):** **T-12** = ticket/cleanup *process* audit only. The
+> §8.8 claim mutual-exclusion proof is **T-20** (not T-12); digest-chain verification is **T-04/T-10**.
+> TD §5.4-principle-4 and ADR-D-18 refs corrected accordingly.
 | T-13 | Compose lifecycle (up/down zero-orphan, cold bring-up, gitleaks CI) | deployment | NFR-01/06/10 |
 | T-14 | Worker-seam + extensibility exercises (add-solver-path review, second worker identity) | architecture test | NFR-05/20 |
-| T-15 | Boundary tests (loopback-only scan, non-root audit, healthz/logs JSON) | security/ops | NFR-07/08/13 |
+| T-15 | Boundary **probe matrix, executed from inside the Hermes container** (1–4 executed 2026-11-15 [V], recorded ADR-D-15): (1) container-internal `127.0.0.1:8100` on the published port → **reachable** (service alive); (2) agent-side `127.0.0.1:8100` → **fails** (namespace isolation proof); (3) bridge-gateway `172.17.0.1:8100` → **reachable** (canonical agent path, authorized); (4) `host.docker.internal:8100` → **reachable** [V re-probe 2026-11-15b: BOTH the gateway IP and the `host.docker.internal` alias traverse to the WSL host from this container (identity-cross-checked via Ollama version bytes); an earlier `refused` reading did not reproduce and is retracted; the gateway IP stays canonical — `ip route`-derived, alias-independent]; **M0 additions**: (5) second container on default bridge, scan → **port 8100 closed** (unauthorized-container non-access); (6) non-root audit; (7) healthz/logs JSON | security/ops | NFR-07/08/13 |
 | T-16 | Digest admission + MANIFEST CI check | security/supply-chain | FR-16 mechanism, NFR-09/11 |
 | T-17 | Agent-container connectivity probe (FINDING-01; runs **from inside** a container like the agent's, host-side curl does not count) | e2e network | NFR-07, FR-01 |
 | T-18 | Backup consistency + OneDrive-offline staleness alarm (sqlite `.backup` product integrity; `backup_stale` escalates) | drill | NFR-22 |
 | T-19 | Daemon-restart reconciliation drill RC-3 (restart dockerd mid-job → re-adopt/re-queue per §8.6, gapless ledger) | drill | NFR-24, §12.5 RC-3 |
+| T-20 | Concurrent ticket-claim **mutual exclusion** (TD §8.8 r2, O_EXCL lockfile): N≥4 processes race `he ticket claim` on one fresh ticket (concurrent API calls or direct `open(..., O_CREAT\|O_EXCL)` against the shared host dir; harness never serializes); **exactly one** creator wins, all others `EEXIST`→409 `already_claimed`; ledger holds exactly one claim event; crash between ticket-rename and lock-unlink leaves ticket done/claimed consistently (reconcile = done/ truth); 10× repetition | concurrency test | FR-23…26, NFR-11 |
+| T-21 | **Stale-claim supersede** (TD §8.8 r2): kill a claimant mid-session → after heartbeat staleness (default 30 min [P], config `HE_CLAIM_STALE_MIN`) with no progress line, a second session's CAS supersede (rename `.stale-<ts>` + re-`O_EXCL`) succeeds and ledger notes it; a concurrent superseder that loses the rename gets `EEXIST`; no ticket stuck unclaimable-while-held forever | concurrency test | FR-23…26, NFR-11 |
+| T-22 | MinIO **version-history** sufficiency (NFR-22/FINDING-05): overwrite a gate-passed object N× in a versioned bucket; `mc mirror` full-then-`--remove` incremental to staging; delete locally then re-mirror → object returns from server-side version history; manifest verifies; staged copy lands via ext4 staging → atomic rename into `BACKUP_ROOT` (never mid-write visible at destination) | backup-integrity test | NFR-22, FR-29 |
 
-## 5. Requirements traceability matrix (requirement → components → tests)
+## 5. Requirements traceability matrix (v1.4: +T-20; T-12 scope disambiguated) (requirement → components → tests)
 
 Components: TS=toolserver, WE=workflow-engine(+queue/gpu-admission), PG=physics-gate,
 MO=minio, REG=registry(SQLite-in-WE), HEA=he-client, HD=heat-data(host dir), IM=images
@@ -291,7 +298,7 @@ MO=minio, REG=registry(SQLite-in-WE), HEA=he-client, HD=heat-data(host dir), IM=
 | FR-35…38 | WE, HD | T-01, T-02, T-05, T-07 |
 | FR-39…40 | HEA, HD, TS | T-08, T-02, T-12 |
 | FR-41…42 | *(M3+ — excluded from initial-release matrix)* | — |
-| T-17…19 (finding-response tests; reqs themselves rowed above) | NFR-07, NFR-22, NFR-24 | T-17, T-18, T-19 |
+| T-17…22 (finding-response + r2 tests; reqs themselves rowed above) | NFR-07, NFR-11, NFR-22, NFR-24 | T-17, T-18, T-19, T-20, T-21, T-22 |
 | NFR-01…02 | OPS, WE | T-13, T-05 |
 | NFR-03…04 | WE, TS, host | T-01, T-09 |
 | NFR-05 | WE(worker seam) | T-14 |

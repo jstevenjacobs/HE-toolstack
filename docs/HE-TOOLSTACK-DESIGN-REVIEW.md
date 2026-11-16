@@ -1,7 +1,7 @@
 # HE-toolstack Architecture Design Review — Checklist & Findings
 
-**Document:** `HE-TOOLSTACK-DESIGN-REVIEW.md` · v1.1 (rev 2026-11-15: re-gated against
-the FINDING-01…08 revision set; see §8 status column) · 2026-11-14
+**Document:** `HE-TOOLSTACK-DESIGN-REVIEW.md` · v1.2 (rev 2026-11-15b: re-gated against
+the review-response-2 correction set (r2 items 1–8); see §8 status column) · 2026-11-14
 **Purpose:** the review instrument required by DesignStandards §8-D. Reviewers work this
 checklist top-to-bottom against `HE-TOOLSTACK-TECHNICAL-DESIGN.md` (TD),
 `HE-TOOLSTACK-ADR.md` (ADR), and `HE-TOOLSTACK-REQUIREMENTS.md` (REQ). Each item is
@@ -80,7 +80,7 @@ deployment/maintenance, limits/risks).
 | A3 | Uncertainty separated from fact: evidence tags [V]/[E]/[P]/[U] used; no untagged performance number | ✅ grep-verified (TD §19 self-check) |
 | A4 | Decisions from *the user* (D-04=B, D-05=1, D-10=separate) represented verbatim-ruled, not silently reinterpreted | 🧑 reviewer to confirm against Phase 1 register |
 | A5 | Proposed-but-not-accepted decisions clearly "Proposed" (D-02 posture → OQ-1) | ✅ |
-| A6 | Open issues never buried in prose — all in OQ table (OQ-1..6) w/ needed-by dates | ✅ |
+| A6 | Open issues never buried in prose — all in OQ table (OQ-1..7) w/ needed-by dates | ✅ |
 | A7 | ID hygiene: single namespace across TD/REQ/ADR (assumption A-ids = Phase 1 canonical; no collisions) | ✅ [V — cross-doc grep 0 dangling; collision found+fixed in QA pass @f44c294] |
 
 ---
@@ -100,7 +100,7 @@ deployment/maintenance, limits/risks).
 
 | # | Check | Status |
 |---|-------|--------|
-| TR1 | Every FR/NFR (63 ids) has verification method + acceptance criteria | ✅ [V — script check @P2.1: 61 rows complete] |
+| TR1 | Every FR/NFR (66 ids: 42 FR + 24 NFR) has verification method + acceptance criteria | ✅ [V — script check @P2.1 + r2 re-gate: all rows complete] |
 | TR2 | REQ §5 matrix: every requirement → ≥1 T-test; every T-ref resolves | ✅ [V — 0 dangling both directions] |
 | TR3 | TD cites REQ ids where requirements are satisfied (component/section level) | ✅ |
 | TR4 | TD references ADR ids for structural choices; ADR ↔ TD bidirectional (OQ-5/OQ-6 present in both) | ✅ [V — grep @f44c294] |
@@ -139,7 +139,7 @@ Reviewers append FINDING-nn rows.
 
 | Reviewer | Role | Date | Verdict (approve / approve w/ exceptions / reject) | Exceptions |
 |----------|------|------|----------------------------------------------------|------------|
-| Steven | owner / decision authority (OQ-1..6 calls) | | | |
+| Steven | owner / decision authority (OQ-1..7 calls) | | | |
 | (TBD) | engineering reviewer — TD §§5–9 | | | |
 | (TBD) | ops reviewer — TD §§11–12 + runbook dry-run | | | |
 
