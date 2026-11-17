@@ -287,6 +287,7 @@ SQLite retained.
 
 ## Remaining risks & decisions
 1. **ADR-D-08 (r3 A1) = OQ-6: reviewer/operator accept required.** Proposed, not assumed.
+   *[2026-11-16: operator ruled — A1 **accepted**, OQ-6 closed; see Appendix E and ADR D-08/OQ-6.]*
 2. **flock is advisory**: a hand-edited ticket that bypasses `he ticket` invalidates the
    guarantee — documented boundary, enforcement is a Stage-E code-lint item, not a DB
    constraint.
@@ -318,3 +319,38 @@ Counts verified at commit time (measured, not asserted): TD top-level sections *
 ## Disposition (r5)
 All five items accepted; corrections applied documentation-only — no scripts written, OneDrive not touched,
 no backup/drill run, nothing deployed, merged, or closed. **STOP per §10 remains in force.**
+
+---
+
+# Appendix E — Round-6: operator rulings recorded (2026-11-16)
+
+**Decision brief delivered 2026-11-16; operator rulings received the same day, verbatim:**
+
+| # | Ruling | Recorded as |
+|---|--------|-------------|
+| D-15 bind topology | dedicated `he-agent` compose network, members only toolserver + Hermes agent | **ADR D-15 → ACCEPTED (Option D)**; TD §5.5 + §17.1 mirror; OQ-5 CLOSED; residual MinIO 127.0.0.1-bind gateway reachability stands as documented, credential-gated (probes r2) |
+| D-16 spawn privilege | scoped spawn-sidecar | **ADR D-16 → ACCEPTED (Option B)**; 4-method API over `he-internal`; server-side policy enforcement (digest-pinned allow-list, network=none, cap_drop=ALL, non-root, CPU/mem ceilings, mount-prefix restriction); OQ-7 CLOSED |
+| ADR-D-08 / OQ-6 | Accept A1 → §8.4b/§7.5/§6.1 freeze as written | **ADR D-08 + Amendment A1 → ACCEPTED**; OQ-6 CLOSED; toolserver sole writer of `submissions` only; T-23 [P] stays the acceptance gate (documentation acceptance ≠ runtime proof) |
+| OQ-9 OneDrive proof | manual ritual | **RULED — Option A**: quarterly manual web read-back ritual [M0] per TD §6.9.4; no Graph API app registration at M0 |
+| OQ-8 MinIO version fallback | no action until T-22 reports | **CONFIRMED**: required-if-triggered fallback, not adopted; activates only if T-22 shows rclone `--s3-versions` insufficient |
+
+**Documentation changes (this round, docs-only):** ADR status blocks D-15/D-16/D-08 (+A1) flipped
+Proposed→Accepted with `DECIDED 2026-11-16 (operator ruling)` provenance; ADR OQ register rows
+OQ-5/6/7 → CLOSED, OQ-9 → RULED, OQ-8 → CONFIRMED-contingent; TD header, §5.5 matrix note,
+§6.9.4, and §17.1 mirror rows updated; QA +Q25 decision-integrity gate (locks the flips against
+regression): **25/25 PASS, 0 FAILS**; Mermaid revalidated 9/9.
+
+**What these rulings do NOT change:** no implementation or deployment was performed; [PRE-M0]/[P]
+markers stay; T-20/T-21/T-22/T-23 remain unexecuted; acceptance of A1 is a design-contract
+acceptance only — T-23 must still pass at Stage B before the contract is runtime-evidenced.
+
+**Open items remaining after round 6:** OQ-1 (ADR-D-02 files-first + tripwires posture) is the
+only open **M0-freeze-blocking** operator decision (target: M0 design freeze). OQ-2 (GB10
+exclusion — D-11 Proposed) targets Stage A; OQ-3 (RTX 5060 Ti co-scheduling re-measure) gates
+GPU-class enablement; OQ-4 is not an M0 blocker. ADR records remaining Proposed: D-02, D-06,
+D-07, D-11, D-17, D-18 (all carry recommendations; their sign-off tracks the OQs above).
+
+## Disposition (r6)
+Five operator decisions recorded verbatim into the registers, documentation-only — nothing
+implemented, deployed, merged, or closed. **STOP per §10 remains in force for
+implementation/deployment; the next operator action is OQ-1.**

@@ -1,6 +1,6 @@
 # HE-toolstack Phase 2 — QA Verification Report
 
-**Document:** `docs/HE-TOOLSTACK-QA-REPORT.md` · v1.5 (rev 2026-11-16 r5: +Q24 backup-coherence gate; r5 rewrote backup mechanics and invalidated three r2 claims (see §3-r5); prior v1.3 (rev 2026-11-15b: review-response 2
+**Document:** `docs/HE-TOOLSTACK-QA-REPORT.md` · v1.6 (rev 2026-11-16 r6: +Q25 decision-integrity gate — operator rulings recorded across ADR/TD registers; prior v1.5 (rev 2026-11-16 r5: +Q24 backup-coherence gate; r5 rewrote backup mechanics and invalidated three r2 claims (see §3-r5); prior v1.3 (rev 2026-11-15b: review-response 2
 re-gate — 8 targeted corrections; +Q18…Q22) · r3 2026-11-16: +Q23 claim/ownership coherence; Q5/Q18/Q20/Q22 evidence refreshed (flock + submissions inbox) · 2026-11-14 (P2.5)
 **Method:** machine-checked where possible (scripts re-run against the repo at HEAD, not
 memory); manual where a human judgment is unavoidable (then stated as such). Baseline:
@@ -35,8 +35,9 @@ commit `b520931` (main); **v1.3 re-gate baseline = branch `review/architecture-r
 | Q22 | Tests T-20 (flock claim race — ≥2 processes, exactly one winner, crash+retry), T-21 (stale-claim supersede/expiry), T-22 (MinIO version-history sufficiency through staging), T-23 (SQLite submission-inbox concurrency + crash matrix) are
 | Q23 | Claim/ownership coherence [r3]: no Toolserver queue-`UPDATE` grant remains in TD; §8.8 claim protocol = flock held lock (no rename-as-lock claim in normative text); §8.4b ownership table + submissions inbox present in TD and mirrored in ADR-D-08 A1 | **PASS** | gates_v13 Q23 |
 | Q24 | **Backup coherence [r5]:** (a) no live normative text asserts cross-filesystem atomic rename to the OneDrive root or `mc mirror` version-history preservation (history/withdrawn mentions allowed); (b) `--allow-active` appears ONLY beside withdrawn/negative language; (c) T-11 no longer affirmatively requires backup-while-jobs-run; (d) quiesce-and-wait §6.9.1, restore spec §9.6, L1–L5 ladder §6.9.4, ADR OQ-8 and OQ-9 all exist; (e) `DONE.json` never described as upload proof in normative text | **PASS** | gates_v13 Q24 (added this pass) |
+| Q25 | **Decision-integrity [r6]:** 2026-11-16 operator rulings recorded coherently — ADR D-15 Accepted (Option D he-agent net), D-16 Accepted (Option B sidecar), D-08+A1 Accepted; ADR OQ-5/OQ-6/OQ-7 carry RULED+CLOSED markers, OQ-9 RULED (Option A ritual), OQ-8 CONFIRMED contingent; TD shows zero stale pending/awaiting markers; TD §17.1 mirror rows updated | **PASS** | gates_v13 Q25 (added this pass) |
 
-**Automated: 24/24 PASS** at the v1.5/r5 re-gate (Q1–Q24; Q24 added after the round-5 backup-mechanic rewrite;
+**Automated: 25/25 PASS** at the v1.6/r6 re-gate (Q1–Q25; Q25 added to lock the 2026-11-16 operator rulings into the registers; the v1.5/r5 24/24 stands for the backup-mechanic rewrite;
 r3's 23/23 stands for the flock/inbox layer; Q3 runs external to the Python harness). Interim FAILs during this revision were again real defects caught by gates —
 a dangling ref to a non-existent ADR record and a missing OQ-1 row in TD — each fixed and re-gated. Harness
 run recorded 2026-11-15b; Q13 path-sweep flags are legacy-context mentions explicitly marked as

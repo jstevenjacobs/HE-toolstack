@@ -63,7 +63,7 @@ acceptance artifact); host-disk SPOF (versioned MinIO tier is the copy); phantom
 recurrence (every §6 component lists its *existing* code lineage or is marked [P]).
 
 **Readiness.** Architecture is review-ready: requirements baselined (v1.3: 66 IDs, 100%
-trace-mapped), 18 ADRs (5 user-ruled/accepted, D-15…D-18 + others proposed pending sign-off),
+trace-mapped), 17 ADR records (10 Accepted after the 2026-11-16 operator rulings — D-15 Option D, D-16 Option B, D-08+Amendment A1, plus earlier rulings D-01/D-03/D-04/D-05/D-09/D-12/D-14; D-02/D-06/D-07/D-11/D-17/D-18 remain Proposed),
 open questions surfaced (OQ-1…7). No milestone's acceptance depends on an unverified premise.
 
 ---
@@ -387,7 +387,7 @@ probed both directions [V 2026-11-16]); external egress is git-over-HTTPS and no
 |----------|-----------|------------------------|-------------------------|
 | agent → toolserver | dedicated `he-agent` network membership (toolserver publishes nothing; §6.4, D-15 rev) | none (no HTTP auth; **network membership = the control**, §10.2) | can submit/inspect jobs as operator — same trust class as operator shell |
 | toolserver → engine | compose-internal network, service DNS (§7.5) | none | engine is same trust class (both operator-owned code) |
-| engine → Docker daemon | **pending OQ-5**: sidecar holds the socket, engine talks narrow HTTP (§6.2b spec, D-16) | sidecar exposes ONLY `create_run`/`status`/`kill`/`logs` (§6.2b paths) for digest-pinned images | with sidecar: one container's lifecycle; with raw socket (rejected option): full host root |
+| engine → Docker daemon | **ruled 2026-11-16 (OQ-5 closed, D-16 Option B)**: sidecar holds the socket, engine talks narrow HTTP (§6.2b spec) | sidecar exposes ONLY `create_run`/`status`/`kill`/`logs` (§6.2b paths) for digest-pinned images | with sidecar: one container's lifecycle; with raw socket (rejected option): full host root |
 | solver container | `--user`, `--pids-limit`, mem/cpu caps, single bind `jobs/<id>/` rw (§6.2), `--network none` for batch phases | none — inputs arrive pre-staged on its bind; no token in env | only its own job dir |
 | MinIO credentials | root creds compose-env (operator-only ports `127.0.0.1:9000` [V §11.3]); service account per-writer bucket prefix [P] | engine holds promote-scoped service key, toolserver none | evidence bucket (delete-able tier, not authority) |
 | Git credentials | host-side only — ledger push runs via host git askpass [E proven PD pattern]; **no git creds inside any container** [V: current PD-toolstack push is host/session-side] | n/a into containers | cannot be leaked by a container compromise |
@@ -793,8 +793,8 @@ is NOT upload proof).**
 - **Consequence, stated plainly (reviewer C):** **no reliable automated completion signal
   exists today → the RPO is NOT guaranteed off-host.** §9.4's RPO is a **local-completion RPO**
   (last `DONE.json` + git on the host disk). Durability beyond the host disk is **unproven**
-  pending OQ-9 (manual ritual adopted as M0 default; Graph as the automation path if
-  commissioned).
+  per OQ-9 as **RULED 2026-11-16: operator accepted Option A — the manual web read-back ritual is the
+  standing mechanism; Graph (Option B) may be commissioned later.** The consequence statement above stands unchanged.
 - `backup_stale` is two-part (§11.8 R-8): (i) no fresh `DONE.json` under `$ROOT` within cadence
   + grace → alarm (L2-level); (ii) no L5 evidence newer than **7 d** → operator reminder.
 
@@ -1558,9 +1558,9 @@ verified before any M3 planning session, same discipline as C6.
 | OQ-3 | PD-toolstack D-ledger historical import: which candidate rows are worth mining into the registry? | free provenance for sweeps vs migrating attempt-1 cruft | operator + agent triage pass | during M1 (registry live) |
 | OQ-4 | physics-gate endpoint wrapper (D-06) + registry/SQLite colocation (D-08) acceptance. | M0 design freeze | reviewer | design freeze |
 | OR-05 | MinIO Chainguard-hardened rebuild (open ticket [E]) — rebuild at seed-script authoring or leave digest-pinned OSS image? | supply-chain posture of the evidence tier | operator | before promote is load-bearing (M1) |
-| OQ-5 | **Job spawn channel** (§6.2): docker.sock mount vs scoped sidecar vs host-unit engine — **analysis complete, recommendation filed as ADR-D-16 (sidecar); operator ruling required** | decides the security-critical component; docker.sock = escape-class power in a container | operator (security posture call) | **M0 blocker** (runner can't spawn without it); **awaiting operator — see review-response §C** |
-| OQ-6 | toolserver shares SQLite WAL vs engine-internal HTTP (§7.5) — **per-table-writer split ruled in §8.4 (toolserver=queue writer, engine=transition writer); canonical ADR-D-08 A1 pending operator accept** | coupling vs one-less-hop | reviewer + operator (ADR-D-08 A1) | design freeze |
-| OQ-7 | **Bind topology** — D-15 (published `127.0.0.1:` + gateway-URL client) supersedes the v1.0 §5.1/§6.2 loopback story; operator accept required | agent can reach tools at all (FINDING-01 proof: current doc topology measurably fails) | operator | design freeze; **resolved-by-evidence, awaiting sign-off** |
+| OQ-5 | **Job spawn channel** (§6.2) — **CLOSED 2026-11-16: operator ruled Option B (scoped spawn-sidecar, ADR-D-16 Accepted).** Residual honestly kept: compromised sidecar still root-equivalent | decides the security-critical component; docker.sock = escape-class power in a container | operator (security posture call) | **M0 blocker CLOSED — implementation may build §6.2b** |
+| OQ-6 | toolserver shares SQLite WAL vs engine-internal HTTP (§7.5) — **CLOSED 2026-11-16: operator ACCEPTED ADR-D-08 Amendment A1 (submissions inbox; toolserver INSERT-only); §8.4b/§7.5/§6.1 freeze as written; T-23 acceptance test** | coupling vs one-less-hop | reviewer + operator (ADR-D-08 A1) | design freeze |
+| OQ-7 | **Bind topology** — **CLOSED 2026-11-16: operator ACCEPTED D-15 Option D (dedicated `he-agent` network, toolserver publishes nothing).** | agent can reach tools at all (FINDING-01 proof: published-port topology measurably fails) | operator | design freeze; **ruled** |
 ### 17.2 Risk register (top 5, owner + mitigation + contingency)
 | Risk | Owner | Mitigation | Contingency if it lands |
 |------|-------|-----------|------------------------|
