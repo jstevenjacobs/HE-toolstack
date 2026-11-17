@@ -16,7 +16,7 @@ channel) are **requests for decision**, not assumed approvals.
 
 | Finding | Disposition | Where | Evidence / note |
 |---|---|---|---|
-| FINDING-01 — loopback/`host.docker.internal` networking claim unverifiable | **ACCEPTED — fixed with measured evidence** | REQ NFR-07 rewrite, FR-01 client URL; TD §6.4, §10 network rows; ADR-D-01 amendment + **new ADR-D-15 (operator decision requested)** | Live probe from inside a container: `172.17.0.1:8100` reachable; `host.docker.internal` resolved to `192.168.65.254` and got ConnectionRefused on loopback services. Design now specifies the bridge-gateway form + published-port pattern `127.0.0.1:PORT:PORT` (no `0.0.0.0` exposure — NFR-07 conflict removed). Final bind-address choice = **D-15, yours**. GitHub #2 |
+| FINDING-01 — loopback/`host.docker.internal` networking claim unverifiable | **ACCEPTED — fixed with measured evidence** | REQ NFR-07 rewrite, FR-01 client URL; TD §6.4, §10 network rows; ADR-D-01 amendment + **new ADR-D-15 (operator decision requested)** | Live probe from inside a container: `172.17.0.1:8100` reachable; `host.docker.internal` resolved to `192.168.65.254` and got ConnectionRefused on loopback services. Design now specifies the bridge-gateway form + published-port pattern `127.0.0.1:PORT:PORT` (no `0.0.0.0` exposure — NFR-07 conflict removed). Final bind-address choice = **D-15, yours**. **[2026-11-16 r7 annotation: the "bridge-gateway form + published-port pattern" text in this row documented the RETRACTED pre-D-15 topology; superseded by D-15 Option D (zero publish, `he-agent` membership, client `http://toolserver:8100`) as ruled 2026-11-16 — see Appendix E/F and REQ NFR-07 r7.]** GitHub #2 |
 | FINDING-02 — container lifecycle ownership undefined | **ACCEPTED — fixed** | TD new §6.10 (lifecycle classes A/B/X), D9 diagram (validated), janitor rules, shutdown order, reconcile-on-start; REQ NFR-10 rewrite | Every container now has exactly one named owner across compose-managed / engine-spawned / host-timer classes; expired containers ≤15 min kept for log capture then reaped. GitHub #3 |
 | FINDING-03 — Docker-socket privilege placement | **ACCEPTED — fixed; recommendation only, decision yours** | TD §6.2 (engine never sees a socket under any option), §5.4b security-boundary table, §13.1 spawn-seam code layout; **ADR-D-16 (3-option comparison, operator decision requested)** | Honest framing kept: a sidecar redistributes privilege, it does not remove it. Review §5.3 side-effect areas covered: uid alignment, audit logging, allow-list enforcement point. GitHub #4 |
 | FINDING-04 — SQLite single-writer claim vs read path | **ACCEPTED — fixed** | TD §6.7 writer-ownership table per DB, §8.8 claim protocol (BEGIN IMMEDIATE + version check), WAL mode stated; REQ NFR-09 amended | One writer per file, readers via WAL; concurrent-session claim race is now a specified protocol with test T-12 + property check. GitHub #5  **(r3 supersession: this row and the r2 §8.8 O_EXCL revision are both superseded — see Appendix C.)** |
@@ -108,7 +108,9 @@ semantics, ownership classes, and labels use one vocabulary across REQ §2.1, TD
   isolation" (the gateway alias reaches published ports indiscriminately). That negative
   result is exactly why the design is membership, not bind-prefix alone: bind `127.0.0.1:`
   remains as host-firewall hygiene (blocks LAN/WAN), he-agent membership is the container
-  control.
+  control. **[2026-11-16 r7: superseded — the final D-15 design publishes NO host port at
+  all, so the loopback hygiene prefix no longer exists for :8100; zero-listener absence
+  replaced hygiene.]**
 - *Reviewer's exact test is specified as the gate:* T-15/T-21 = another container on the
   same default bridge MUST fail to reach the toolserver; Ollama embed-side gets its own
   dedicated service network; host CLI health path keeps the loopback-only publish (host
@@ -354,3 +356,51 @@ D-07, D-11, D-17, D-18 (all carry recommendations; their sign-off tracks the OQs
 Five operator decisions recorded verbatim into the registers, documentation-only — nothing
 implemented, deployed, merged, or closed. **STOP per §10 remains in force for
 implementation/deployment; the next operator action is OQ-1.**
+
+---
+
+## Appendix F — Round-7 correction: agent connectivity & network isolation (docs-only, 2026-11-16)
+
+Reviewer item-by-item:
+
+- **A — measured facts preserved.** The four probe facts (agent-netns loopback refused;
+  `host.docker.internal:8100` refused in the measured r2 environment; `172.17.0.1:8100`
+  reachable **when a port was published**; host publication pattern `127.0.0.1:8100:8100`
+  as the then-model) remain recorded as [V]-tagged measurement history in TD §5.1, the ADR-D-15
+  Context block, and this response's r2 text. No fact was deleted; conclusions drawn from them
+  were corrected.
+- **B — bind vs publish separated.** Two named settings, one concept each: **inside-container
+  listen address** `TS_BIND=0.0.0.0` (TD §6.1/§11.6 layer 1 — Docker's forwarding path cannot
+  reach a loopback in-namespace bind; not exposure) vs **host publication** (TD §11.6 layer 2 —
+  none exists for :8100; any host `:8100` listener = preflight failure). The old single
+  `TS_BIND=127.0.0.1` conflated the two namespaces — corrected in §6.1, §11.3, §11.6.
+- **C — boundary proven by mechanism, tested by matrix.** New TD §5.4b **T-15 six-leg matrix**
+  (agent member / default-bridge peer / compose-net peer / host-local / LAN-side / other bridges),
+  each leg with source namespace, destination, expected result, and enforcement mechanism.
+  Expectations are structural (zero host listener + named-network membership), so the peer
+  negative legs are defensible **without** relying on loopback binding — the reviewer's point
+  that loopback ≠ authZ is now an explicit anti-claim guard in the table. Leg 3 (compose-net)
+  is marked the design's discriminating test. **NFR-07 acceptance is conditional on executing
+  this matrix at M0 — no claim of satisfaction before execution.**
+- **D — operator decision preserved.** ADR-D-15 records the ruling (Option D, 2026-11-16) with
+  full measurement provenance; this appendix records what the gateway route proves (published
+  ports are gateway-reachable engine-wide, so option C fails isolation by construction) vs what
+  it doesn't (it never proved membership control works — that is the zero-publish demonstration
+  [V 2026-11-16] plus the M0 matrix). Nothing was newly approved here; r6's ruling stands, r7
+  corrected the reasoning text around it.
+- **E — diagrams & text aligned.** D1 (agent→`http://toolserver:8100` over he-agent, zero
+  publish) and D4 caption (no inbound claims beyond mechanism-derived, to-be-executed matrix)
+  updated; §7.1 stale `Base http://127.0.0.1:8100` → `http://toolserver:8100`; §10.2/R rows now
+  state membership is access control, not authN. No normative success requirement references
+  `host.docker.internal:8100` anywhere; remaining mentions are retraction/probe history.
+
+**Reviewer-cited "REQ NFR-16":** in the REQ registry NFR-16 is digest-on-artifacts (untouched —
+not network-related). The connectivity/trust items the review targets are **NFR-07, T-15, T-17**
+and the traceability rows citing them; all corrected under r7. Flagged for mapping confirmation.
+
+Files changed this round: TD v1.6→v1.7 (§5.4b matrix, §6.1, §7.1, §10.2 risk row, §11.3, §11.6,
+D1/D4 captions); REQ v1.6→v1.7 (NFR-07 rewrite, T-15 six-leg restatement); ADR v1.6→v1.7
+(§5 intro annotation, D-15 record unchanged — ruling already recorded); this response
+(FINDING-01 row annotation, hygiene-line annotation, Appendix F). **STOP per §10 remains in
+force: no network configuration, firewall, Docker network, container, or deployment-script
+change was made or will be before approval; PR #11 stays open and unmerged.**

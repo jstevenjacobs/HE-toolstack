@@ -1,6 +1,6 @@
 # HE-toolstack Architecture Decision Register (ADR)
 
-**Document:** `HE-TOOLSTACK-ADR.md` · v1.6 (rev 2026-11-16 r6: **operator rulings recorded** — D-15 approved as Option D (he-agent net), D-16 approved as Option B (spawn-sidecar), ADR-D-08 A1 accepted, OQ-9 ruled Option A (manual ritual), OQ-8 confirmed contingent-on-T-22; prior r5: ADR-D-14 **A2** — mirror-history + ADR-D-14 **A2** — mirror-history + atomic-cross-FS-rename + OneDrive-sync-status claims corrected, quiesce-and-wait policy ruled, OQ-8/OQ-9 opened; prior r3: ADR-D-08 A1 reworded to the submissions-inbox model (r2 per-table split withdrawn as self-contradictory); OQ-6 synced. Prior rev 2026-11-15b: review-response 2 — D-15 probe-matrix correction [V re-probe 15b], D-16 points at TD §6.2b normative API; prior v1.2: response 1 — D-01/D-08/D-14 A1, +D-15…D-18; prior v1.1: +D-14 backup root) · 2026-11-14
+**Document:** `HE-TOOLSTACK-ADR.md` · v1.7 (rev 2026-11-16 r7: r2-era filing-time lines annotated where superseded by the r6 rulings; records themselves unchanged. v1.6 r6: **operator rulings recorded** — D-15 approved as Option D (he-agent net), D-16 approved as Option B (spawn-sidecar), ADR-D-08 A1 accepted, OQ-9 ruled Option A (manual ritual), OQ-8 confirmed contingent-on-T-22; prior r5: ADR-D-14 **A2** — mirror-history + ADR-D-14 **A2** — mirror-history + atomic-cross-FS-rename + OneDrive-sync-status claims corrected, quiesce-and-wait policy ruled, OQ-8/OQ-9 opened; prior r3: ADR-D-08 A1 reworded to the submissions-inbox model (r2 per-table split withdrawn as self-contradictory); OQ-6 synced. Prior rev 2026-11-15b: review-response 2 — D-15 probe-matrix correction [V re-probe 15b], D-16 points at TD §6.2b normative API; prior v1.2: response 1 — D-01/D-08/D-14 A1, +D-15…D-18; prior v1.1: +D-14 backup root) · 2026-11-14
 **Status:** Living register (Phase 2 deliverable B of DesignStandards §8). Updates are ledger-
 backed commits; superseded ADRs stay visible with status `Superseded by …`.
 **Companion:** `HE-TOOLSTACK-TECHNICAL-DESIGN.md` §17 summarizes this register; requirement
@@ -371,10 +371,12 @@ Decision provenance classes, stated up front because reviewers must be able to a
 
 ## 5. Records filed in the 2026-11-15 architecture-review response
 
-Provenance class for all four: **Proposed** (§0 vocabulary). None of D-15/D-16 is accepted:
-they change security-relevant exposure and privilege and are explicit operator decision
-requests (review §7). D-17/D-18 are contract/semantics corrections inside author authority,
-marked Proposed pending the independent review.
+Provenance class at filing: all four **Proposed** (§0 vocabulary). D-15/D-16 changed
+security-relevant exposure and privilege and were explicit operator decision requests
+(review §7) — **[2026-11-16: operator ruled — D-15 ACCEPTED (Option D), D-16 ACCEPTED
+(Option B); see their records and Appendix E of the review response; this filing-time line
+is retained for history.]** D-17/D-18 are contract/semantics corrections inside author
+authority, marked Proposed pending the independent review.
 
 ### ADR-D-15 — Toolserver reach topology: dedicated `he-agent` network, ZERO published ports (FINDING-01; review round-2 item 2)
 - **Status:** **ACCEPTED by operator ruling 2026-11-16 — Option D: dedicated `he-agent` compose network whose only members are the toolserver and the Hermes agent container; port 8100 is never published.** (was Proposed — network-topology change class; ruling recorded verbatim from operator). **Date:** 2026-11-15; rewritten 2026-11-16 after the r2 probes below invalidated the earlier draft.

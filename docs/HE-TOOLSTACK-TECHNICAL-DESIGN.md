@@ -1,6 +1,6 @@
 # HE-toolstack Technical Design Document
 
-**Document:** `HE-TOOLSTACK-TECHNICAL-DESIGN.md` · v1.5 (rev 2026-11-16: **round-5 backup corrections** — §6.9 rewritten (quiesce-and-wait §6.9.1; candidate→verify→DONE→NTFS-publish §6.9.2; MinIO version export §6.9.3 replacing the retracted mc-mirror-history claim; OneDrive L1–L5 proof ladder §6.9.4 with the explicit no-L4/L5-signal statement + OQ-8/OQ-9); §9.4 RPO reclassified local-completion; §9.6 restore-drill spec added; R-8 two-part staleness; D8 redrawn. Prior rev v1.4 (round-3 corrections — §8.8 ticket claim = flock(2) held-lock protocol; §7.5/§8.4b queue write-ownership resolved via submissions inbox. Earlier rev 2026-11-15b: review-response 2 — §6.2b normative spawn-sidecar API spec; §6.10 lifecycle classes + labels; §8.8 real claim mutual exclusion (O_EXCL lockfile arbiter); §6.7 WAL fairness corrected; §5.1 probe matrix re-run + Ollama bind finding [V]; D1/D2/D3/D4/D5/D8/D9 redrawn; prior v1.2: review response 1) · 2026-11-14
+**Document:** `HE-TOOLSTACK-TECHNICAL-DESIGN.md` · v1.7 (rev 2026-11-16 **r7 — network-isolation correction**: bind-vs-publish separation made normative (§6.1/§11.3/§11.6), gateway client-URL probe retracted, six-leg T-15 isolation matrix referenced (§7.1/§10.1), Diagram 3 host-listener node fixed, D-15-accepted wording aligned; NOTE: the r6 ruling-record commit left this header line stale at v1.5 — caught in r7 recon; register flips themselves were verified at r6. Prior r5 rev: **round-5 backup corrections** — §6.9 rewritten (quiesce-and-wait §6.9.1; candidate→verify→DONE→NTFS-publish §6.9.2; MinIO version export §6.9.3 replacing the retracted mc-mirror-history claim; OneDrive L1–L5 proof ladder §6.9.4 with the explicit no-L4/L5-signal statement + OQ-8/OQ-9); §9.4 RPO reclassified local-completion; §9.6 restore-drill spec added; R-8 two-part staleness; D8 redrawn. Prior rev v1.4 (round-3 corrections — §8.8 ticket claim = flock(2) held-lock protocol; §7.5/§8.4b queue write-ownership resolved via submissions inbox. Earlier rev 2026-11-15b: review-response 2 — §6.2b normative spawn-sidecar API spec; §6.10 lifecycle classes + labels; §8.8 real claim mutual exclusion (O_EXCL lockfile arbiter); §6.7 WAL fairness corrected; §5.1 probe matrix re-run + Ollama bind finding [V]; D1/D2/D3/D4/D5/D8/D9 redrawn; prior v1.2: review response 1) · 2026-11-14
 **Status:** Revised for re-review (DESIGN STATUS: CHANGES REQUESTED response package; Phase 2 deliverable A of DesignStandards §8)
 **Revision log (v1.2 → v1.3, r2 second-review items 1–8):** sidecar API normative spec §6.2b (operation-canonical paths; ADR/QA/TD synced); §8.8 claim = O_EXCL lockfile CAS (rename-CAS was the reviewer's item-3 objection, valid); WAL db-wide-write correction §6.7/§7.5; network probe matrix corrected + host-bind audit §5.1/§5.3/§6.4/D1/D4 (the hdi-refusal claim was over-generalized — fixed); backup: mc-mirror version-history + cross-fs transfer (mv-is-atomic claim only holds same-fs) §6.9; diagrams D1/D4 now show sidecar+gateway; lifecycle label triple normalized §6.10. (v1.1 → v1.2 adds review-§5.5 failure-class taxonomy (§12.5) + R-9 drill; §5.1 session/claim protocol §8.8; §5.2 durability matrix §5.4a; §5.4 security-boundary table §5.4b; §5.3 admission-soundness note §6.4; FM-11…13; T-17…19 refs; OQ-7; gateway-form client URL).**
 **Revision log (v1.1):** F1 client URL/bind topology (§5.1 D1, §6.4, §7.1); F2 lifecycle classes + §6.10 + D9; F3 spawn-sidecar §6.2/§10.1; F4 per-table writers §6.7/§7.5/§8.2/§8.4; F5 backup procedure §6.9/§12.2; F6 MinIO dependency semantics §6.1/§6.5/§7.2/§12.3; F7 201 contract + state boundaries §7.2/§8; F8 counts/refs across the package.
@@ -317,7 +317,7 @@ graph TB
             J1[job container<br/>one-shot, network_mode none,<br/>bind: heat-data/runs/&lt;id&gt;/work]
         end
         HDD[("/dev/sdf ext4<br/>/home/steven/HE-toolstack/heat-data")]
-        LB["127.0.0.1:8100 toolserver<br/>127.0.0.1:9000/9001 minio (operator)"]
+        LB["host published ports: 9000/9001 minio only (operator,<br/>127.0.0.1 prefix; toolserver publishes NOTHING —<br/>reached via he-agent net, zero host listener [V D-15])"]
     end
     TSc --- LB; WEc -- bind mount rw --> HDD
     J1 -- bind mount rw --> HDD; MOc -- bind mount rw --> HDD
@@ -336,9 +336,11 @@ graph LR
     WE -- "S3 API :9000 in-net" --> MO[minio]
     STACK -. "HTTPS outbound (git push only)" .-> GH[GitHub]
 ```
-*Diagram 4 — network communication. No inbound path exists from LAN, the compose net, or any
-non-member container to the toolserver (NFR-07, T-15; D-15 rev — membership is the only path,
-probed both directions [V 2026-11-16]); external egress is git-over-HTTPS and nothing else in M0.*
+*Diagram 4 — network communication (r7). The agent↔toolserver path exists only on `he-agent`
+(zero host publication, D-15 Accepted). No inbound path is claimed from LAN or any non-member
+namespace: expectations for every route are derived in the T-15 six-leg matrix (§5.4b) and
+EXECUTED at M0 before NFR-07 is marked satisfied. External egress is git-over-HTTPS and nothing
+else in M0.*
 
 ### 5.4 Architectural principles
 1. **One lifecycle per system** (D-01). Implication: every service has compose healthcheck +
@@ -385,7 +387,7 @@ probed both directions [V 2026-11-16]); external egress is git-over-HTTPS and no
 ### 5.4b Security-boundary table [review §5.4, added 2026-11-15 — one place, all boundaries]
 | Boundary | Mechanism | Credential crossing it | Blast radius if crossed |
 |----------|-----------|------------------------|-------------------------|
-| agent → toolserver | dedicated `he-agent` network membership (toolserver publishes nothing; §6.4, D-15 rev) | none (no HTTP auth; **network membership = the control**, §10.2) | can submit/inspect jobs as operator — same trust class as operator shell |
+| agent → toolserver | dedicated `he-agent` network membership ONLY — zero host publication makes every gateway/bridge path structurally impossible (T-15 matrix §5.4b; §6.1, D-15 Accepted) | none — **network membership is the boundary**: it is an access-control mechanism enforced by Docker routing, NOT authentication; any `he-agent` member acts as the operator (credential-equivalent; §10.2) | can submit/inspect jobs as operator — same trust class as operator shell |
 | toolserver → engine | compose-internal network, service DNS (§7.5) | none | engine is same trust class (both operator-owned code) |
 | engine → Docker daemon | **ruled 2026-11-16 (OQ-5 closed, D-16 Option B)**: sidecar holds the socket, engine talks narrow HTTP (§6.2b spec) | sidecar exposes ONLY `create_run`/`status`/`kill`/`logs` (§6.2b paths) for digest-pinned images | with sidecar: one container's lifecycle; with raw socket (rejected option): full host root |
 | solver container | `--user`, `--pids-limit`, mem/cpu caps, single bind `jobs/<id>/` rw (§6.2), `--network none` for batch phases | none — inputs arrive pre-staged on its bind; no token in env | only its own job dir |
@@ -395,6 +397,23 @@ probed both directions [V 2026-11-16]); external egress is git-over-HTTPS and no
 | network isolation | dedicated `he-agent` net for the API (zero publish, D-15 rev); remaining published ports all `127.0.0.1:` prefix (host/LAN control — **not** container isolation, measured [V]); solver `--network none` at batch | — | LAN never exposed; accepted residual: MinIO `127.0.0.1:9000/9001` remain gateway-reachable from engine containers, credential-gated (D-15 Consequences) |
 This table is the checklist answer for review §5.4; each row's [E]/[V] tag is the same evidence discipline as elsewhere.
 
+
+**T-15 isolation probe matrix (r7, mechanism-derived expectations; execution due M0 —
+NFR-07 is NOT marked satisfied until run; design contract per §10 STOP):**
+
+| Leg | Source namespace (IP class) | Destination | Expected | Enforcement mechanism |
+|-----|------------------------------|-------------|----------|------------------------|
+| 1 Hermes agent | agent container (default bridge + `he-agent` member) | `http://toolserver:8100/healthz` (service DNS) | **reachable, 200** | `he-agent` membership (only path) |
+| 2 Peer on Docker default bridge | fresh container, default bridge only (`172.17.0.0/16`) | (a) `http://toolserver:8100` (b) `http://172.17.0.1:8100` (c) `http://host.docker.internal:8100` | (a) **DNS unresolvable** (b) **refused** (c) **refused** | (a) not on `he-agent`; (b/c) **no host listener exists** — zero published port |
+| 3 Container on compose net | fresh container joined to project `he-net` | (a) `http://toolserver:8100` (b) `http://<toolserver-task-ip>:8100` | **(a) unresolvable, (b) refused** if the service has no `he-net` alias; **reachable → FINDING** if it does | service attached to `he-agent` only; leg 3 is the design's discriminating test |
+| 4 Host-local | WSL host shell (`127.0.0.1`, `172.17.0.1`) | `http://127.0.0.1:8100`, `http://172.17.0.1:8100` | **refused** (nothing listening) | zero host publication; preflight asserts absence (§11.3) |
+| 5 LAN-side | separate machine on LAN → WSL host IP :8100 | TCP :8100 | **refused/closed** (no listener; also subject to WSL NAT) | zero publication — replaces the old "port closed because loopback-bound" expectation, which described the RETRACTED publish model |
+| 6 Other bridges/paths | container on any other local bridge (e.g. `br-<id>` networks) | `http://<gateway-ip-of-that-bridge>:8100` | **refused** | no host listener on any interface; measured precedent [V 2026-11-16]: published ports WERE gateway-reachable from any bridge on this engine — absence of publication is what closes every leg |
+
+**Anti-claim guard (r7):** loopback binding is not authentication or authorization, and a
+loopback-published port still accepted connections from other containers on this engine
+(measured). The only structural control is **absence of a host listener + named-network
+membership**; container-IP allow-lists are explicitly rejected (IPs are ephemeral).
 
 ## 6. Detailed Component Design
 
@@ -411,7 +430,7 @@ proven by ledger.
 ### 6.1 Toolserver  [P — thin; lineage: no prior HTTP server existed; agent called scripts directly [E]]
 - **Problem/necessity:** the agent needs one narrow, contract-testable door into jobs,
   queue, registry and gate — instead of ssh-and-pray shell access (attempt-1 practice). It
-  is also the single place loopback security (NFR-07) and idempotency (FR-39) live.
+  is also the single place reach-control for the API (NFR-07: `he-agent` network **membership**, zero published port — D-15 rev) and idempotency (FR-39) live.
 - **Owns:** HTTP request validation, job submission records, idempotency-key store,
   OpenAPI surface, error envelope. **Explicitly does not own:** scheduling (engine), state
   writes into workflows/ (runner), physics verdicts (gate scripts), MinIO credentials
@@ -434,9 +453,13 @@ proven by ledger.
   CLI/health → `make health` (one-shot container on the he-agent net — host does not route to
   dedicated-net IPs [V probe], and the toolserver publishes NO port). **Normative: any
   `:8100` host listener (bare OR loopback-prefixed) is a preflight failure** (§11.3) —
-  publishing a port publishes it to every engine container, measured [V 2026-11-16]. **Configuration (§11.6):** `TS_BIND` (inside-container bind `0.0.0.0` on the compose interface is REQUIRED for the
-docker-proxy to forward; host-side exposure is what stays loopback-only via the `ports`
-127.0.0.1 prefix — FINDING-01 clarifies the two layers), `TS_PORT=8100`,
+  publishing a port publishes it to every engine container, measured [V 2026-11-16]. **Configuration (§11.6 — two distinct layers, r7):** (1) *inside-container listen address*
+`TS_BIND=0.0.0.0` — the process must bind `0.0.0.0` on its container interface; a loopback
+in-namespace bind would make Docker's forwarding path unable to reach it, and an in-namespace
+`0.0.0.0` bind is **not** exposure (the namespace is the boundary). (2) *host publication* —
+there is **none for 8100** (D-15 rev: zero published ports; exposure control is no longer a
+`ports:` prefix question at all). One variable must never stand for both layers (r7 item B).
+`TS_PORT=8100`,
   `HE_DATA=/data`, `QUEUE_DB`, `IDEMPOTENCY_TTL`.
 - **Persistence:** none of its own beyond queue DB rows + idempotency table.
 - **Startup/shutdown:** compose `depends_on: workflow-engine: condition: service_healthy`;
@@ -447,7 +470,7 @@ docker-proxy to forward; host-side exposure is what stays loopback-only via the 
 - **Failure modes:** crash ⇒ zero data loss (stateless edge; agent retries with same
   idempotency key, FR-39); WAL lock contention with engine ⇒ single-writer ordering means
   toolserver inserts are rare small writes; p95 read target NFR-04 (T-09 under load).
-- **Security:** loopback-only bind, non-root uid 1000, no MinIO creds, request body caps
+- **Security:** reach = `he-agent` network membership only (zero host publication; any host `:8100` listener = preflight failure), non-root uid 1000, no MinIO creds, request body caps
   (artifact pointers not bytes — §7.4), CORS off.
 - **Testing:** contract suite T-08 (OpenAPI fixtures incl. error envelope, idempotency
   replay, 413/409/422 paths). Deployed as compose service `toolserver` (§11.3).
@@ -854,9 +877,10 @@ sequenceDiagram
   dedicated-net IPs directly [V]). Acceptance connect test runs **from inside the agent
   container** (§11.5 — host-side curl proves nothing, F1), and the negative half runs from a
   NON-member container (T-15: service name unresolvable, no gateway path — refusal expected).
-Base `http://127.0.0.1:8100`; JSON only; auth: **none by design in initial release — the
-loopback bind *is* the control** (NFR-07; deferred auth F-1 documented there, never implied
-present). All timestamps RFC 3339 UTC. All list endpoints cursor-paginated (`?cursor=&limit=`,
+Canonical base = §7.1 client URLs above (`http://toolserver:8100`); JSON only; auth: **none by
+design in initial release — `he-agent` network *membership* is the control** (NFR-07 r7: not the
+bind — a bind address is exposure control, never authN/Z; deferred auth F-1 documented there,
+never implied present). All timestamps RFC 3339 UTC. All list endpoints cursor-paginated (`?cursor=&limit=`,
 default 50). Errors (§7.3) on every endpoint; unknown fields rejected (`422`) so contract
 drift is loud. Idempotency: mutation endpoints accept `Idempotency-Key` header (client-
 generated uuid4; server keeps 24 h map; replays return stored response + `Idempotent-Replay:
@@ -1205,7 +1229,7 @@ log is the artifact.
 internet-facing surface)
 | Threat | Vector | Mitigation | Residual |
 |--------|--------|-----------|----------|
-| Stray process / other container reaching stack API | compose net or LAN hit :8100 | loopback bind enforced (entrypoint fail-fast check §11.6) + no published port on compose net; T-15 negative test | host-local processes (same trust domain — accepted) |
+| Stray process / other container reaching stack API | compose net, default bridge, or LAN hit :8100 | **structural (r7): zero published port for 8100 (a host `:8100` listener of any kind = preflight failure) + dedicated `he-agent` network whose members are only toolserver + agent** — a non-member has no route to the port, proven per-leg by the T-15 six-leg matrix (legs 2/3/5/6 negative; expected results derived from mechanism, execution due M0) | host-local processes reaching `make health`'s launched container = same trust domain (accepted); MinIO published ports carry the documented residual (§5.4b) |
 | Data exfil / tamper via credentials in repo | gitleaks CI [E-proven pattern]; secrets only in `deploy/.env` (gitignored) + env injection | `.env` file perms 600, host uid 1000 | operator disk trust |
 | Container escape via spawn channel | OQ-5 docker.sock mount | preferred resolution: sidecar-scoped socket (option b) — flagged as the review-gate decision, NOT swept under a default | if option (a) chosen: host-trust equivalent, documented |
 | Malformed params → solver abuse (path traversal, arg injection) | toolserver validation | schema-enforced params (allowlist per job_type), run-dir jail (bind only that dir; `--network none`; read-only rootfs where image allows) | solver-internal bugs (out of scope; images are pinned OSS) |
@@ -1224,14 +1248,20 @@ internet-facing surface)
   privilege, and audits the crossing — it does not eliminate the class. Option A's
   *cheaper* alternative is accepted only with the operator's eyes open (OQ-5).
 ### 10.2 Authentication/authorization
-**None at the HTTP layer — by explicit design** (loopback = the control; F-1). No JWT/API
-keys are implied anywhere in §7. Cross-container: shared Docker network isolation + MinIO
-root creds scoped to engine container env only. Deferred options (never claimed present):
-mTLS or token auth if the bind ever moves off loopback — that move *requires* an ADR.
+**None at the HTTP layer — by explicit design.** The control is **`he-agent` network
+membership, r7** — *not* a bind address: binding to loopback (any namespace) is exposure
+control and has never been authentication or authorization (F-1 documents the deferral, never
+implies presence). No JWT/API keys are implied anywhere in §7. Cross-container: per-network
+Docker ACL scoping (membership checked per packet; `he-agent`/`he-internal` are separate
+networks — a compose-net or bridge container gets no service-DNS alias and no route to the
+toolserver, T-15 legs 2/3/6) + MinIO root creds scoped to engine container env only. Deferred
+options (never claimed present): mTLS or token auth if membership ever widens beyond the
+two-member rule — that move *requires* an ADR.
 ### 10.3 Data protection
 At rest: no encryption at rest on host ext4 (single-user workstation trust; stated, not
-hidden); MinIO SSE not enabled initial release [proposal, revisit at M2]. In transit: HTTP
-loopback (no TLS — same trust domain); to GitHub: HTTPS/git over TLS (platform); to MinIO
+hidden); MinIO SSE not enabled initial release [proposal, revisit at M2]. In transit: HTTP on the
+`he-agent`/`he-internal` networks (no TLS — membership-gated, same trust domain; r7 wording — it is
+not 'loopback', there is no loopback path to the service at all); to GitHub: HTTPS/git over TLS (platform); to MinIO
 from tool containers: in-network plain HTTP *only on the internal bridge* — flagged.
 Secrets: `.env` + env-injection; gitleaks; the cognee/agent PATs live outside the stack
 entirely.
@@ -1265,7 +1295,8 @@ mount healthy; Ollama embeddings live (co-resident check, informational); GPU pr
 (C6 state recorded at every preflight — honesty mechanism).
 
 ### 11.3 Compose topology [P — the normative file lives at `deploy/docker-compose.yml`]
-Services: `toolserver` (build `images/toolserver`, loopback `127.0.0.1:8100:8100`),
+Services: `toolserver` (build `images/toolserver`; **no `ports:` entry for 8100 — zero host
+publication, D-15 Accepted**; attached to the dedicated `he-agent` network, §6.1/§11.6),
 `workflow-engine` (build `images/workflow-engine`, binds heat-data rw, OQ-5 spawn channel,
 `depends_on: minio: service_started` — F6/ADR-D-17: NOT `service_healthy`; engine treats
 MinIO as an optional dependency and self-degrades promotion, §6.2), `minio` (image digest-pinned in MANIFEST, `pull_policy:
@@ -1276,14 +1307,21 @@ NOT compose services (one-shot spawns per job — §6.2) except none-run-daemons
 zero long-running solver containers (verified stance carried from attempt 1 [E]).
 Every service: healthcheck, `restart: unless-stopped`, json-file caps, `user: "1000:1000"`
 where image supports (audit NFR-08), image pinned by **digest** not tag (T-16).
-- **Network bindings (v1.1, F1/F2):** compose file MUST publish toolserver as literal
-  `"127.0.0.1:8100:8100"` (a bare `8100:8100` = 0.0.0.0 exposure = preflight failure);
+- **Network bindings (r7, D-15 rev supersedes the v1.1 literal-publish rule):** the compose
+  file MUST declare top-level `he-agent` (internal) with the toolserver attached and MUST publish
+  **no host port for 8100 — under any prefix**. Any `:8100` host listener (bare OR
+  `127.0.0.1:`) = preflight failure: the old `"127.0.0.1:8100:8100"` requirement is **RETRACTED**
+  (measured [V 2026-11-16]: loopback-published ports are gateway-reachable from every engine
+  container — publishing even loopback fails the peer-container negative test by construction).
+  Inside-container `TS_BIND=0.0.0.0` remains required (§6.1 layer 1) and is not exposure.
   spawn-sidecar publishes NOTHING; job containers spawn `--network none` (sidecar-enforced).
-- **Client-URL probe (v1.1, F1):** preflight runs, **from inside the agent container**
-  (`docker exec <hermes> python3 -c "urllib probe"`), `GET /health` against the gateway URL
-  (auto-discovered default route) — this is the *only* connectivity proof preflight accepts;
-  host-side loopback curl is supplementary, never the acceptance test (measured: the two
-  disagree [V 2026-11-15]).
+- **Client-URL probe (r7, replaces the v1.1 gateway-URL probe):** preflight runs, **from
+  inside the agent container** (`docker exec <hermes> python3 -c "urllib probe"`), `GET
+  /healthz` against **`http://toolserver:8100`** (he-agent service DNS) — this is the *only*
+  connectivity proof preflight accepts, paired with the **negative leg** from a fresh
+  non-member container (service name unresolvable + gateway :8100 refused, T-15 legs 2/3).
+  The old gateway-URL probe is **RETRACTED** — it probed the retracted host-publish topology.
+  Host-side curl remains supplementary, never the acceptance test (F1).
 - **Lifecycle labels (F2):** compose services get label `he-stack=1` + compose project label;
   post-`make down` assertion `docker ps -a --filter label=he-stack=1 -q | wc -l` == 0 (T-13).
 
@@ -1300,7 +1338,7 @@ env-injected.
 | Key | Default | Consumer | Notes |
 |-----|---------|----------|-------|
 | `HE_DATA` | `/home/steven/HE-toolstack/heat-data` | all | D-05 owner dir |
-| `TS_BIND` / `TS_PORT` | `127.0.0.1` / `8100` | toolserver | bind non-overridable away from loopback (entrypoint guard) [proposal] |
+| `TS_BIND` / `TS_PORT` | `0.0.0.0` / `8100` | toolserver | **inside-container listen layer only (r7)** — must be `0.0.0.0` on the container interface for Docker's forwarding path; NOT an exposure knob: host publication is a *separate* compose `ports:` concern and is ZERO for 8100 (D-15 rev; §6.1 two-layer note). The old `127.0.0.1`-default + 'non-overridable away from loopback' guard is RETRACTED (in-namespace loopback bind would break the service-DNS path other containers use to reach it) [proposal] |
 | `QUEUE_DB` | `$HE_DATA/stack.db` | engine+toolserver | WAL |
 | `MAX_CONC_CPU` / `MAX_CONC_GPU` | `2` [proposal] / `1` (D-04) | engine | gpu=1 is a ruling, not tuning |
 | `GPU_VRAM_CEILING_GIB` | `8` (D-04, OQ-2) | admission | job-declared ceilings validated against it |
