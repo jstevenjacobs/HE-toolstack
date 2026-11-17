@@ -515,3 +515,28 @@ Documentation-only pass closing the last cross-document API drift, per operator 
 D-17 canonical, D-18 A1); this response (FINDING-03/06/07 rows, Correction 6 paths, Appendix H);
 QA v1.9→v2.0 (+Q28). **STOP per §10 remains in force: no API implementation, application code,
 deployment, D-16 approval, merge, or issue-closure action taken.**
+
+---
+
+## Appendix I — Round 11 (2026-11-17): D-16 status conflict RULED by the operator
+
+The round-10 brief's "retain the fact that ADR-D-16 remains Proposed" conflicted with the
+round-6 operator ruling (Option B ACCEPTED, 2026-11-16). The r10 response kept the record
+open and flagged the conflict (Appendix H; PR comment `issuecomment-6959504627`).
+
+**Operator ruling 2026-11-17: "My decision is r6 is accepted."** Consequences, docs-only:
+
+- **ADR-D-16 status = ACCEPTED (Option B)** — the r6 ruling stands; D-16 A1 now records the
+  conflict and its resolution instead of leaving the record open. Header reworded to
+  "RULED: Option B". OQ-5 stays closed.
+- **Standing caveat unchanged everywhere:** a compromised sidecar is still root-equivalent —
+  the ruling adopts privilege *redistribution*, not elimination. The sidecar remains an
+  accepted *design*, not an implemented component; nothing implements it before M0 exit.
+- TD v1.11: the one stale v1.1 filing-time label ("ADR-D-16 Proposed") in the §12 risk-table
+  row annotated with its ruling date; all diagrams already read "D-16 ACCEPTED 2026-11-16".
+- QA v2.1: Q28 D-16 assertion re-anchored to the resolution text; 27/27 PASS re-run at r11.
+- No other open items changed by this ruling: remaining reviewer-side list is unchanged
+  (D-17/D-18 accepts, OQ-4 D-06 half, review §9 sign-offs).
+
+**STOP per §10 re-declared after this round: no implementation, deployment, merge, or
+issue-closure action taken.**

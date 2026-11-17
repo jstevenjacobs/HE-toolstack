@@ -1,6 +1,6 @@
 # HE-toolstack Architecture Decision Register (ADR)
 
-**Document:** `HE-TOOLSTACK-ADR.md` · v1.10 (rev 2026-11-17 **r10 — API-contract canonicalization**: D-16 A1/A2 (spawn-axis clarification; §6.2b path mapping locked; record open pending operator), D-17 canonical health trio (`/health` retired), D-18 A1 (`POST /jobs` body exactly `{job_id, queue_pos}`); previously r9 — lifecycle ownership: D-01 A1 corrected — class-C canonical core 5
+**Document:** `HE-TOOLSTACK-ADR.md` · v1.11 (rev 2026-11-17 **r11 — D-16 status conflict RULED by operator: round-6 ACCEPTED (Option B) stands, confirmed 2026-11-17**; r10 — API-contract canonicalization: D-16 A1/A2 (spawn-axis clarification; §6.2b path mapping locked; record open pending operator), D-17 canonical health trio (`/health` retired), D-18 A1 (`POST /jobs` body exactly `{job_id, queue_pos}`); previously r9 — lifecycle ownership: D-01 A1 corrected — class-C canonical core 5
   per TD §6.10 r9, spawn path via the D-16 sidecar, `make down` restated as the six-step host recipe;
 canonical label `he-stack=1`. Earlier v1.8 (rev 2026-11-17 r8: **OQ-1 RULED — ADR-D-02 Accepted as written per operator ruling; D-02 status line, X-2 and §4 row updated; r7 corrections + NFR-16 mapping accepted by operator.** v1.7 r7: r2-era filing-time lines annotated where superseded by the r6 rulings; records themselves unchanged. v1.6 r6: **operator rulings recorded** — D-15 approved as Option D (he-agent net), D-16 approved as Option B (spawn-sidecar), ADR-D-08 A1 accepted, OQ-9 ruled Option A (manual ritual), OQ-8 confirmed contingent-on-T-22; prior r5: ADR-D-14 **A2** — mirror-history + ADR-D-14 **A2** — mirror-history + atomic-cross-FS-rename + OneDrive-sync-status claims corrected, quiesce-and-wait policy ruled, OQ-8/OQ-9 opened; prior r3: ADR-D-08 A1 reworded to the submissions-inbox model (r2 per-table split withdrawn as self-contradictory); OQ-6 synced. Prior rev 2026-11-15b: review-response 2 — D-15 probe-matrix correction [V re-probe 15b], D-16 points at TD §6.2b normative API; prior v1.2: response 1 — D-01/D-08/D-14 A1, +D-15…D-18; prior v1.1: +D-14 backup root) · 2026-11-14
 **Status:** Living register (Phase 2 deliverable B of DesignStandards §8). Updates are ledger-
@@ -438,7 +438,7 @@ authority, marked Proposed pending the independent review.
   triple-refusal from non-member) as the acceptance test.
 - **Refs:** FINDING-01 (GitHub #2), review round-2 item 2, NFR-07, NFR-16, FR-01…08, D3; ADR-D-09 unchanged.
 
-### ADR-D-16 — Job-spawn privilege: scoped spawn-sidecar (Option B hardened) — operator decision requested (FINDING-03 / OQ-5)
+### ADR-D-16 — Job-spawn privilege: scoped spawn-sidecar (Option B hardened) — RULED: Option B, operator ruling 2026-11-16, conflict resolved by operator 2026-11-17 (FINDING-03 / OQ-5)
 - **Status:** **ACCEPTED by operator ruling 2026-11-16 — Option B: scoped spawn-sidecar** (socket confined to the sidecar container; engine reaches only the 4-method API of TD §6.2b over `he-internal`; server-side allow-list enforcement as specified). **OQ-5 closed.** The honestly-stated residual stands: a compromised sidecar is still root-equivalent — the ruling adopts privilege *redistribution*, not elimination. **Date:** 2026-11-15; ruled 2026-11-16.
 - **Options evaluated in full at §13.1 (11 dimensions × 3 options). Summary:**
   - **A. Mount `/var/run/docker.sock` into workflow-engine.** Zero new components; but the
@@ -474,10 +474,12 @@ authority, marked Proposed pending the independent review.
   files-first per ADR-D-02) governs the *workflow-state handoff* axis (engine↔toolserver artifact
   and state exchange); it does **not** dissolve the *spawn-privilege* problem this record addresses:
   the engine still needs solver containers started, and D-16 is where that privilege placement is
-  decided. The round-10 brief directs D-16 be kept **Proposed pending the operator's decision**;
-  the register separately records the round-6 ACCEPTED ruling (Option B) for audit — the conflict
-  is flagged to the operator in the round-10 PR note. This record stays open on either reading and
-  **nothing implements it before M0 exit**.
+  decided. The round-10 brief asked that D-16 be kept **Proposed pending the operator's decision**,
+  which conflicted with the round-6 ACCEPTED ruling recorded above; the conflict was flagged to
+  the operator in the round-10 PR note. **RESOLVED 2026-11-17 (round 11): the operator ruled
+  explicitly — the round-6 ACCEPTED ruling (Option B) stands.** Status = **ACCEPTED**; the
+  root-equivalence caveat above remains drawn unchanged everywhere. This is a design decision,
+  not an implementation: **nothing implements it before M0 exit**.
 - **A2 (2026-11-17 r10):** the four operations now have exact HTTP mapping in **TD §6.2b** (`POST
   /v1/create_run`, `GET /v1/runs/<id>/status`, `POST /v1/runs/<id>/kill`, `GET /v1/runs/<id>/logs`) with normative
   identity/authorization, idempotency, and timeout rows (paths locked r10 — earlier
