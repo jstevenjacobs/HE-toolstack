@@ -1,6 +1,6 @@
 # HE-toolstack Technical Design Document
 
-**Document:** `HE-TOOLSTACK-TECHNICAL-DESIGN.md` · v1.4 (rev 2026-11-16: round-3 corrections — §8.8 ticket claim = flock(2) held-lock protocol; §7.5/§8.4b queue write-ownership resolved via submissions inbox. Earlier rev 2026-11-15b: review-response 2 — §6.2b normative spawn-sidecar API spec; §6.10 lifecycle classes + labels; §8.8 real claim mutual exclusion (O_EXCL lockfile arbiter); §6.7 WAL fairness corrected; §5.1 probe matrix re-run + Ollama bind finding [V]; D1/D2/D3/D4/D5/D8/D9 redrawn; prior v1.2: review response 1) · 2026-11-14
+**Document:** `HE-TOOLSTACK-TECHNICAL-DESIGN.md` · v1.5 (rev 2026-11-16: **round-5 backup corrections** — §6.9 rewritten (quiesce-and-wait §6.9.1; candidate→verify→DONE→NTFS-publish §6.9.2; MinIO version export §6.9.3 replacing the retracted mc-mirror-history claim; OneDrive L1–L5 proof ladder §6.9.4 with the explicit no-L4/L5-signal statement + OQ-8/OQ-9); §9.4 RPO reclassified local-completion; §9.6 restore-drill spec added; R-8 two-part staleness; D8 redrawn. Prior rev v1.4 (round-3 corrections — §8.8 ticket claim = flock(2) held-lock protocol; §7.5/§8.4b queue write-ownership resolved via submissions inbox. Earlier rev 2026-11-15b: review-response 2 — §6.2b normative spawn-sidecar API spec; §6.10 lifecycle classes + labels; §8.8 real claim mutual exclusion (O_EXCL lockfile arbiter); §6.7 WAL fairness corrected; §5.1 probe matrix re-run + Ollama bind finding [V]; D1/D2/D3/D4/D5/D8/D9 redrawn; prior v1.2: review response 1) · 2026-11-14
 **Status:** Revised for re-review (DESIGN STATUS: CHANGES REQUESTED response package; Phase 2 deliverable A of DesignStandards §8)
 **Revision log (v1.2 → v1.3, r2 second-review items 1–8):** sidecar API normative spec §6.2b (operation-canonical paths; ADR/QA/TD synced); §8.8 claim = O_EXCL lockfile CAS (rename-CAS was the reviewer's item-3 objection, valid); WAL db-wide-write correction §6.7/§7.5; network probe matrix corrected + host-bind audit §5.1/§5.3/§6.4/D1/D4 (the hdi-refusal claim was over-generalized — fixed); backup: mc-mirror version-history + cross-fs transfer (mv-is-atomic claim only holds same-fs) §6.9; diagrams D1/D4 now show sidecar+gateway; lifecycle label triple normalized §6.10. (v1.1 → v1.2 adds review-§5.5 failure-class taxonomy (§12.5) + R-9 drill; §5.1 session/claim protocol §8.8; §5.2 durability matrix §5.4a; §5.4 security-boundary table §5.4b; §5.3 admission-soundness note §6.4; FM-11…13; T-17…19 refs; OQ-7; gateway-form client URL).**
 **Revision log (v1.1):** F1 client URL/bind topology (§5.1 D1, §6.4, §7.1); F2 lifecycle classes + §6.10 + D9; F3 spawn-sidecar §6.2/§10.1; F4 per-table writers §6.7/§7.5/§8.2/§8.4; F5 backup procedure §6.9/§12.2; F6 MinIO dependency semantics §6.1/§6.5/§7.2/§12.3; F7 201 contract + state boundaries §7.2/§8; F8 counts/refs across the package.
@@ -380,7 +380,7 @@ probed both directions [V 2026-11-16]); external egress is git-over-HTTPS and no
 | 2 state.json | write temp → `fsync` → `os.replace` → `fsync(dir)` | atomic rename (ext4 guarantee: rename is atomic w.r.t. readers) + dir fsync for rename persistence | readers see old-or-new, never torn (FM-8) | same, with ≤ one rename-window uncertainty — resolved by §8.6 ordering rules |
 | 3 ledger | append line → `fsync` → git push later | append-only + fsync | partial line possible at EOF ⇒ **ledger reader tolerates trailing torn line** (parse-lenient; last-good-line checkpoint in state.json) | same |
 | 4 git push | network op | not a durability step (copy, not authority); retry queue (FM-9) | drained on retry | drained on retry |
-**Declared dependencies on filesystem behavior:** ext4 with `data=ordered` default (WSL2 default [V preflight]) — rename atomicity + rename-on-write are relied upon; **not** relied upon: delayed-allocation atomicity of *content* writes (hence explicit fsync in rows 1–2); **not** relied upon: O_DIRECT (absent). SQLite rows: SQLite's own WAL fsync discipline (per SQLite docs [V]), engine adds none. Disk-failure beyond OS crash is explicitly outside every row — RC-5/backup territory (§12.5).
+**Declared dependencies on filesystem behavior:** ext4 with `data=ordered` default (WSL2 default [V preflight]) — rename atomicity + rename-on-write are relied upon; **not** relied upon: delayed-allocation atomicity of *content* writes (hence explicit fsync in rows 1–2); **not** relied upon: O_DIRECT (absent). SQLite rows: SQLite's own WAL fsync discipline (per SQLite docs [V]), engine adds none. Disk-failure beyond OS crash is explicitly outside every row — RC-5/backup territory (§12.5). **Boundary note (r5): every rename-atomicity guarantee here is SAME-filesystem (ext4) only — the backup publication path crosses into `/mnt/c` (NTFS via 9p/DRVfs) where POSIX rename does not span the boundary and durability semantics differ entirely; the backup protocol therefore uses copy + destination digest verification + completion marker (§6.9.2), never a cross-FS rename claim.**
 
 ### 5.4b Security-boundary table [review §5.4, added 2026-11-15 — one place, all boundaries]
 | Boundary | Mechanism | Credential crossing it | Blast radius if crossed |
@@ -659,79 +659,144 @@ table (r2 item 6 closure condition).
 
 
 ### 6.9 Host backup job  [thin host timer, in-repo `deploy/backup/` [P]; not a compose service — lifecycle class X, §6.10]
-- **Problem/necessity:** D-05 makes one host dir authoritative — off-box copies are the only hedge
-  against disk loss, and attempt-1 proved drills are worthless unless they run against the *real*
-  destination. The user ruling of 2026-11-15 (D-14) fixes the destination so drift is impossible.
-- **Destination (D-14, user ruling, canonical — NOT a design choice):** every backup output —
-  full or incremental — lands under exactly `/mnt/c/Users/steven/OneDrive/Backup/HE-toolstack/`
-  (verified present on host [V]; attempt-1's proven cron+drill used the same OneDrive root [E
-  §10.5, row 13]). Layout: `heat-data/<yyyymmdd>/` (state), `repo/` (git bundle), `drills/`
-  (evidence). No other destination is a restore source; a second-disk copy is optional
-  redundancy, never canonical. X-8 (no hot solver I/O on `/mnt/c`, 28–39× penalty [E]) is
-  **not** violated: backups are cold, append-only copies off the critical path [E ruling-
-  reconciliation; §14 note].
-- **Application-consistent procedure (FINDING-05, GitHub #6 — supersedes the v1.0 plain-rsync
-  sketch; a completed rsync is explicitly NOT evidence of consistency):**
-  1. **Quiesce-lite:** preflight refuses to start while any job is in `running` unless
-     `--allow-active` (default refuse; a full idle window nightly is the M0 schedule) [P].
-     Active-solver policy: solver runs are ≤ minutes (FR-05 class); nightly window chosen to
-     miss them; a job that *starts during* the run makes that backup **job-artifact-incomplete**
-     — the manifest records `active_jobs_at_start` so a restore knows exactly what to expect.
-  2. **SQLite:** never copy live `.db`/`.db-wal`. Use `sqlite3 file:heat.db?immutable=0
-     ".backup <staging>/heat.db"` (online backup API — consistent snapshot, WAL folded in)
-     then `PRAGMA wal_checkpoint(TRUNCATE)` on the *staging copy* only [V method: SQLite
-     online-backup API is the documented hot-copy path].
-  3. **MinIO:** consistency per the image actually deployed (RELEASE.2025-04-22 [V]):
-     server-side bucket versioning + `mc mirror` (in-net, read-only source) into staging,
-     **not** a raw copy of the MinIO data dir while the server writes. Raw-dir copies are
-     banned: erasure/dir layout is not crash-consistent under concurrent writes [V: MinIO
-     documents no read-your-writes dir snapshot]. **Version-history caveat (r2 item 4):**
-     `mc mirror` copies only *current* object versions by default — a plain mirror silently
-     DROPS the version history that FR-29/NFR-17 depend on. Normative form:
-     `mc mirror --versioned --newer-than ...` into staging (preserves delete markers +
-     noncurrent versions where the destination filesystem supports the layout; verified
-     per-release at M0 — T-11(d)) — with fallback ruled honestly: if `--versioned` to a
-     plain filesystem proves unsupported on the deployed release [U until drill], canonical
-     history lives in **staged per-object manifest of versionIds + digest** (registry rows
-     already carry versionIds), and restore reads by explicit versionId via GetObject (D8
-     restore path already does exactly this — no reliance on mirror-restored history).
-     `mc diff` after mirror = verification input.
-  4. **Stage (ext4) + transfer + atomic complete (r2 item 4 — the `mv` claim corrected):**
-     everything writes to `heat-data/<yyyymmdd>.staging/` on **ext4** first; on verification
-     success write `MANIFEST.json` (per-file sha256, counts, `active_jobs_at_start`, stack git
-     SHA, DB `integrity_check` result). **The staging dir and the OneDrive destination are
-     DIFFERENT filesystems** (ext4 vs `/mnt/c` drvfs/9p [V]) — an `mv` across them is a
-     **copy+delete, NOT atomic**. Normative transfer: `rsync` staging →
-     `BACKUP_ROOT/heat-data/<yyyymmdd>.staging/`, `fsync`+flush, re-hash per file at
-     destination (MANIFEST recompute), THEN `mv` **within the destination** (same fs = atomic)
-     `<yyyymmdd>.staging/` → `<yyyymmdd>/`. Interrupted-transfer outcomes: absent, or a
-     destination-side `.staging` leftover quarantined >48 h (logged), or a source-side ext4
-     staging (cheap, deleted next run). No partial final dir can exist on the destination.
-  5. **Verification:** after finalization, spot-verify 25 random manifest sha256s against
-     source-of-record files; OneDrive sync completion is *observed*, not assumed — poll
-     until sentinel `DONE` file shows sync state "uploaded" (File-Attributes API /
-     `attrib -r` placeholder check on the Windows side) with timeout = failure [P]; RPO
-     claim is only as good as this step (D8 diagram node).
-  6. **Restore reconciliation (R-4/R-8 full validation):** restore order = registry DB →
-     runs/ tree → MinIO mirror-back (server down during restore ⇒ no split-brain; single
-     writer restart after) → `make doctor` cross-checks every `promoted` candidate's
-     manifest digest vs MinIO object version. Post-restore the DB is the *stale* truth by
-     ≤ RPO: any artifact on disk newer than its DB row is treated as orphan-suspect (moved,
-     not adopted) — adoption requires a human call, recorded in `ledger.md`.
-- **RPO/RTO [P assumptions for review]:** RPO ≤24 h (nightly; OneDrive continuous sync of
-  already-written files is *secondary* protection, not the RPO clock — sync lag under
-  Files-On-Demand is [U]). RTO ≤2 h for registry+runs, +1–3 h MinIO mirror-back at M0
-  volumes (~GBs [E estimate]); validated by T-11 drill measurement, not asserted.
-- **Integrity verification:** every final dir has MANIFEST.json w/ sha256 set; monthly drill
-  = restore latest into throwaway path → T-11 digest compare → sentinel + sync-status proof.
-- **Testing:** T-11 asserts (a) timer writes only under `BACKUP_ROOT`, (b) staging-then-move
-  ⇒ interrupted run leaves zero final dirs, (c) drill reproduces digests from that path,
-  (d) `active_jobs_at_start` recorded, (e) sync-completion observed before `DONE`.
-- **Alternatives:** second physical disk only — demoted to *optional* local redundancy [E:
-  previous `/home/steven/backups` practice]; ruled out as canonical because it shares the
-  host's fate. restic/borg encryption+dedup — deferred to M2 [P]: OneDrive versioning covers
-  the near-term risk; add once volumes justify key-management cost. `vfsstreaming`/SQLite
-  snapshot-file copies — rejected: don't fold WAL correctly [V: SQLite docs].
+
+**Cadence:** nightly 03:30 CST (host timer; **Windows host** — WSL itself may sleep when the
+machine is off), plus optional manual trigger. **Source:** `/home/steven/HE-toolstack/heat-data`
+(authoritative, ext4 [V]). **Destination (canonical, ruling D-14):**
+`/mnt/c/Users/steven/OneDrive/Backup/HE-toolstack/` (`$ROOT`), WSL-visible at the same path [V].
+Solver I/O does **not** move to `/mnt/c` (WSL-mount metadata overhead, FM-9): the backup reads
+the ext4 tree, it never relocates it. **Status: designed, never run — the stack is unbuilt.**
+
+**Application-consistency property (normative):** no solver artifact file is read for backup
+while its producing job is still writing it. This holds **because the run refuses to copy while
+the stack is not quiet (§6.9.1)** — not because any read pattern is inherently race-safe. A tree
+copied with active solver output must never be called application-consistent.
+
+**§6.9.1 Active-job policy (r5 — one coherent choice; replaces the r2 "refuse by default +
+`--allow-active` drill override", which contradicted §6.9's own refusal and is WITHDRAWN).**
+Chosen for M0: **quiesce-and-wait; no live-state override exists** (`--allow-active` is removed
+from the design, not gated). Rationale: the safe alternative — a snapshot mechanism that
+captures active job state + artifacts consistently — would have to be *proven*, and none exists
+for this workload on this filesystem pair (`cp`-ing a live tree is the torn-copy case the review
+named). Behavior matrix:
+- **Job already running at backup start** → run aborts **before copying anything** (exit 2, no
+  candidate, nothing published). A skipped night is loud: `backup_stale` (§6.9.4, R-8).
+- **Job submitted during the copy window** → paused: the timer installs
+  `heat-data/.backup-pause` **before** the active-job check; the toolserver answers new
+  submissions with 409 `backup_paused` while the file exists (§8.7 row added).
+- **Job starting after the initial active-job check** → impossible under policy (pause precedes
+  check); if observed anyway (hand-submitted violation), the re-check after snapshot aborts the
+  run — nothing published.
+- **Crash during the backup** → a `.candidate-*` dir, or a dated dir, **without** a valid
+  `DONE.json` is by definition not a backup: next run quarantines or resumes it (§6.9.2 step 8);
+  restore selection never sees a partial tree as complete.
+- **Incomplete run restored from backup** → cannot happen for *included* runs: every run dir in
+  the manifest was complete when copied (quiet stack). A restore to an instant *before* a run
+  completed leaves that run `active`/`queued` at the backup point → FR-37 reconciliation at
+  restart handles it (§9.6 step 3), which is the designed behavior, not corruption.
+- **Operational tradeoff (stated):** submissions see a minutes-long `409 backup_paused` window;
+  on a busy box a night may be **skipped entirely** until a quiet window opens — `backup_stale`
+  is the compensator, cadence grace absorbs one miss. Accepted for M0 in exchange for never
+  copying a torn artifact. Revisit only if skip rate becomes material, and then only with a
+  *proven* snapshot mechanism, not with a renamed override flag.
+
+**§6.9.2 Physical data path (r5 correction).** The r2 step "stage on ext4 → **atomic rename**
+into final dir under `BACKUP_ROOT`" was a category error: ext4 → `/mnt/c` is **not** a
+same-filesystem rename — POSIX rename cannot span the mount (and the r1 wording "atomic rename
+into `BACKUP_ROOT`" is retracted everywhere). Valid copy-and-publish protocol:
+1. **Quiesce gate (§6.9.1):** flock `heat-data/.locks/backup.lock` (§8.8 machinery, single
+   writer) → write `.backup-pause` → poll stack status (loopback, host-reachable): active
+   tickets + solver procs == **0** → re-check after step 2; any nonzero → abort per §6.9.1.
+2. **Application-consistent snapshot on the ext4 working filesystem:** `sqlite3 .backup`
+   online-backup API for `queue.db`/`registry.db` (WAL folded — a plain `cp` of a live DB is
+   explicitly rejected; WAL checkpoint state is inside the snapshot); `cp -a` ledger + tickets
+   trees (quiet under step 1); write `.snapshot.json` (included paths + sizes + source stat).
+   ext4 staging holds **only** these small consistent files; the large artifact tree is read
+   direct from its authoritative location (frozen, per step 1) — one local copy per byte.
+3. **Validate the source snapshot:** `PRAGMA integrity_check` + `quick_check` on each snapshot
+   DB; ledger parses to its final line; sha256 per file over the **included set** →
+   `manifest.src`. Under the quiesce gate the source cannot change mid-copy (the r2 §6.9
+   step-4 "source moved during copy" self-race is eliminated by policy, and any violation
+   still trips step 5).
+4. **Copy the snapshot to a temporary destination directory under the canonical root:**
+   `$ROOT/.candidate-<runid>/`. Transport = **robocopy from the Windows host** (native NTFS +
+   9P read path, bulk-copy proven on this box [E]; `/E /ZB /MT:8 /R:3 /W:5 /LOG+:<run log>`,
+   driven by a path-prefixed file list generated at step 3). Exit codes < 8 = *local write
+   complete* (level **L2**, §6.9.4) — nothing more. In-container `mc`/`rsync` are not the
+   transport.
+5. **Verify all destination files and digests:** re-hash every file in the candidate against
+   `manifest.src` (size + sha256; `.copied` progress markers make re-runs skip only
+   checksum-verified files — size-only is never sufficient). Any mismatch → quarantine (§8 of
+   this list), exit 1.
+6. **Publish a completion marker ONLY after destination verification:** write `DONE.json`
+   inside the candidate (`runid`, manifest digest, per-file digests, engine/git HEAD,
+   `quiesce: {active_jobs_at_check: 0, pause_installed: true, checked_at}`, timestamps). Re-hash
+   manifest + DONE.json lines (catches last-write races). Local sync-client quiet via
+   `robocopy /MON:1 /MOT:1` — still **not** upload proof (§6.9.4).
+7. **Publish = rename `.candidate-<runid>` → `$ROOT/heat-data/<yyyymmdd>.<runid>/` — a rename
+   **within the NTFS volume** (valid, same-volume); then a final `/MON:1 /MOT:1` quiet pass.
+   No consumer ever observes a half-named tree.
+8. **Interrupted transfer — detection, resume, retention (normative):** what is detected: a
+   `.candidate-*` dir, or a dated dir, **without** valid `DONE.json` → not a backup. Handling:
+   resume per `.copied`/digest markers (idempotent) or delete-and-restart; quarantine =
+   `$ROOT/.quarantine/<runid>.<reason>/`, retained **14 d** then timer-deleted with an R-8 log
+   line. Incomplete trees are never restore sources (§9.6 step 1).
+9. **Restore reads the canonical destination** (`$ROOT/heat-data/<date>.<runid>/`), never the
+   live source tree (§9.6).
+The legacy second-disk copy (`/home/steven/backups` [E]) stays optional local redundancy, never
+a restore source.
+
+**§6.9.3 MinIO data: version-history **export** (r5 — the `mc mirror` version-history claim is
+WITHDRAWN).** Verified against vendor behavior: `mc mirror` (with or without `--overwrite`/
+`--remove`) replicates **current object data only** — it copies **no** non-current versions and
+**no** bucket versioning configuration; the r2 line that server-side versioning was
+"retained for version-aware restore" via mirrored staging preserved **zero** history, so
+version-aware restore from that backup was impossible [research 2026-11-16; rclone maintainer
+confirms mirror-class tools read versions but cannot recreate them at a destination].
+Resolution — export history **as data**, and state exactly what it buys:
+- **Mechanism (proposal, runtime-verify T-22):** backup exports the versioned bucket with
+  `rclone` source-remote `--s3-versions` (every historical version lands as a distinct payload
+  file with a version-suffixed name) **plus** a **version manifest** (`mc ls --versions --json`
+  dump: VersionId, key, size, etag, mtime per version) written into the backup tree. Restore
+  of a *specific* version = select from manifest, re-upload that payload as a new object.
+- **Preserved:** the content of every version (recoverable bytes) + the complete version
+  register. **Lost vs native:** no `?versionId=` read-back, no in-place un-delete, no restored
+  versioning semantics at the recovery site (re-upload creates fresh versions).
+- **Honest bound (do not read past it):** until T-22 runs, backup version coverage is
+  *specified, not proven*. If T-22 fails with the deployed rclone/MinIO versions, **OQ-8**
+  fires: fallback = latest-version-only backup + **explicit NFR-17 relaxation** — what would be
+  lost is restorability of *superseded* promoted objects after bucket loss (in-app versioning
+  still protects runtime hot-promotions; promoted artifacts keep their git-side copy §9.3).
+  The design does **not** silently weaken NFR-17 and does **not** claim historical versions are
+  backed up while they are not.
+- `mc mirror` is removed from the backup design entirely (it never earned its place: the
+  versioning rationale was the only one it had).
+
+**§6.9.4 OneDrive synchronization proof — five levels, honestly separated (r5: the r2
+"`File-Attributes` API / `attrib -r`" placeholder read-back is WITHDRAWN; a local `DONE.json`
+is NOT upload proof).**
+- **L1** file exists in the WSL-visible directory — proves nothing.
+- **L2** copied to destination + digest-verified (§6.9.2 steps 4–5). `DONE.json` is **L2
+  evidence only** — it records that the *local* backup completed.
+- **L3** the OneDrive client has *processed* the file locally. The `attrib` placeholder/offline
+  bits are **negative-only** evidence: set ⇒ definitely not uploaded; cleared ⇒ **still no
+  proof** of completion.
+- **L4** upload to the remote OneDrive service completed.
+- **L5** the remote copy was read back and verified (content/digest from the service).
+- **Real mechanisms available in THIS host environment (verified inventory):** for L4/L5 —
+  **(a) manual web read-back**: operator opens the OneDrive web folder, confirms `DONE.json` +
+  manifest, signs `drills/onedrive-readback.log` (L5-grade when performed); **(b) Microsoft
+  Graph API** read-back — requires an app registration + token that **do not exist in this
+  design today** → **OQ-9**. Robocopy `/MON:1 /MOT:1` quiet waits prove only that the local
+  sync client stopped touching the tree (between L2 and L3 — below L4, stated as such). No
+  supported CLI/file-attribute signal reaches L4/L5 without credentials.
+- **Consequence, stated plainly (reviewer C):** **no reliable automated completion signal
+  exists today → the RPO is NOT guaranteed off-host.** §9.4's RPO is a **local-completion RPO**
+  (last `DONE.json` + git on the host disk). Durability beyond the host disk is **unproven**
+  pending OQ-9 (manual ritual adopted as M0 default; Graph as the automation path if
+  commissioned).
+- `backup_stale` is two-part (§11.8 R-8): (i) no fresh `DONE.json` under `$ROOT` within cadence
+  + grace → alarm (L2-level); (ii) no L5 evidence newer than **7 d** → operator reminder.
 
 ### 6.10 Container lifecycle classes, shutdown, and the janitor  [FINDING-02, GitHub #3 — added 2026-11-15]
 - **Lifecycle owner of every container (normative; ADR-D-01 A1):**
@@ -802,7 +867,7 @@ are pointers, not bytes — §7.4); client default 10 s + 3 retries w/ backoff o
 | Method | Path | Purpose | Auth | Idem | Success | Notable errors |
 |--------|------|---------|------|------|---------|----------------|
 | GET | `/healthz` | liveness (toolserver/healthz mirrors engine/minio reach) | — | — | 200 | 503 deps down |
-| POST | `/jobs` | submit tool job `{tool, params, run_id?, vram_ceiling?, priority}` | loopback | ✔ | 201 `{job_id, queue_pos}` | 422 unknown tool/digest not in MANIFEST (`409 digest_unpinned`); 413 body>1 MiB; 429 queue-full (bound 200 [P]) |
+| POST | `/jobs` | submit tool job `{tool, params, run_id?, vram_ceiling?, priority}` | loopback | ✔ | 201 `{job_id, queue_pos}` | 422 unknown tool/digest not in MANIFEST (`409 digest_unpinned`); 413 body>1 MiB; 429 queue-full (bound 200 [P]); 409 `backup_paused` during the §6.9.1 pause window |
 | GET | `/jobs/{id}` | status `{state, started?, finished?, exit?, gate?}` | loopback | — | 200 | 404 |
 | GET | `/jobs?state=&tool=&cursor=` | list/filter | loopback | — | 200 | — |
 | POST | `/jobs/{id}/cancel` | request cancel (SIGTERM→grace→kill 30 s [P]) | loopback | ✔ | 202 | 409 already terminal |
@@ -1081,10 +1146,10 @@ Runs: hot tier retained until explicitly archived (disk watermark: engine alerts
 of /dev/sdf, refuses new runs at 95 % — FM-6; deletion is human/operator choice, never
 automatic — physics evidence is the product). Promoted objects: MinIO versioning with
 Keep-Version retention, no auto-expiry [proposal; revisit when >500 GB]. Git: append-only.
-Scratch: 24 h pruning, safe by §9.1 definition. Backup cadence: heat-data nightly mirror to the **canonical backup root**
+Scratch: 24 h pruning, safe by §9.1 definition. Backup cadence: heat-data nightly **application-consistent backup under the §6.9.1 quiesce-and-wait** policy to the **canonical backup root**
 `/mnt/c/Users/steven/OneDrive/Backup/HE-toolstack/` (ruling D-14, NFR-22; §6.9 — OneDrive-managed,
 WSL-visible); the legacy second-disk copy (`/home/steven/backups` [E]) is optional extra local
-redundancy, never a restore source. RPO = last nightly + git (NFR-19).
+redundancy, never a restore source. **RPO = last `DONE.json` completion marker + git (NFR-19) — a LOCAL-COMPLETION RPO: off-host durability is unproven pending the §6.9.4 L4/L5 proof gap (OQ-9).**
 
 ### 9.5 Versioning and integrity
 Images: semver tags + immutable digest pins in `docs/MANIFEST`; `pull_policy: never` means
@@ -1093,6 +1158,44 @@ manifest at fsync boundary; gate + promote + registry each re-verify on read (NF
 State: atomic rename = single valid version at all times (partial writes impossible by
 construction). Config: compose + `.env` committed minus secrets (§10.3); every parameter
 cross-referenced §11.6.
+
+---
+
+### 9.6 Restore drill from the canonical destination (T-11; consistency alarms T-18) [design]
+
+**Execution status: NOT executed.** The stack does not exist (§7 law). **T-11 has not passed and
+nothing in this package may state or imply that it has** — runtime tests are *specified, not
+executed* (DesignStandards: proposed ≠ verified). This section specifies what the drill will
+prove, all steps reading `$ROOT = /mnt/c/Users/steven/OneDrive/Backup/HE-toolstack/` (the
+canonical destination, never the live source):
+1. **Preflight / selection:** newest dated dir with a schema-valid `DONE.json` (no-DONE =
+   incomplete → §6.9.2 step 8, excluded); re-hash every file against its manifest before any
+   restore action (digest chain re-established at drill time); open
+   `drills/T-11/<runid>.log`.
+2. **SQLite integrity + WAL consistency:** snapshot DBs restored to scratch → `PRAGMA
+   integrity_check` + `quick_check` clean; WAL folded inside the online-backup product (no
+   stray `-wal` dependency); state spot-checks vs `DONE.json.quiesce` block.
+3. **Run-state / job-state reconciliation:** in a **disposable copy** of heat-data (isolation
+   dir — never the authoritative path), start the stack → FR-37 matrix converges every run to
+   terminal-or-queued with zero manual repair (§8.6); services reach `healthy` (design-time).
+4. **Artifact digests:** included-set re-hash == manifest, exactly.
+5. **MinIO object integrity + version-history behavior:** current-payload recovery digest match;
+   **version-export count == version-manifest count == overwrite count** (T-22 acceptance — the
+   falsifiable test behind §6.9.3, not an assumed property).
+6. **Git bundle recovery:** `git bundle verify $ROOT/repo/*.bundle` + clone to temp; HEAD ==
+   `DONE.json.repo.head`.
+7. **Completion marker + manifest integrity:** DONE.json validates, self-digest round-trips,
+   dir name matches `runid`.
+8. **OneDrive read-back evidence (L5, §6.9.4):** attach current L5 artifact — M0 = signed manual
+   web read-back log; Graph-based once OQ-9 decides. **No L5 evidence → drill is INCOMPLETE,
+   not passed** (honesty rule; absence is a result, not a footnote).
+9. **Post-restart reconciliation:** `/health` + status endpoint answer; ledger parses; no orphan
+   claimed (no live lease §8.8); evidence log closed with per-step pass/fail.
+
+**Acceptance criteria (conjunction):** integrity_check clean · destination digests == manifest ·
+version-export counts match (T-22) · repo HEAD restored · reconciliation converges, zero manual
+repair · DONE.json valid · L5 evidence attached · **the drill was actually executed** and its
+log is the artifact.
 
 ---
 
@@ -1254,12 +1357,7 @@ prohibition: no step a fresh session can't run blind)
   succeeded stand (design §6.5).
 - **R-7 disk full:** engine refuses at hard watermark (FM-6); operator archives cold runs to
   archive disk (promotion copies exist in MinIO) — decision support: `du` report command.
-- **R-8 backup health / stale mirror:** timer missed or `BACKUP_ROOT` unreachable (C: unmounted,
-  OneDrive paused): nightly job writes a ledger line + sentinel `heat-data/backup.status.json`
-  (`{ts, bytes, dest}`); `make doctor` fails if sentinel age > 36 h [P]. Fix path: re-mount/enable,
-  re-run job manually (`make backup`), confirm sentinel + OneDrive sync state; if root is gone for
-  >7 days, escalate: hot data is single-copy — pause promotions? no: promotions continue (git +
-  MinIO tiers unaffected), but flag `backup_stale` in healthz (NFR-22 guard).
+- **R-8 backup health / stale backup (two-part, §6.9.4):** **(i) L2/local** — timer missed, `BACKUP_ROOT` unreachable (C: `/mnt/c` unmounted, OneDrive paused), or **no fresh valid `DONE.json`** under the canonical root within cadence + grace: nightly job writes a ledger line + sentinel `heat-data/backup.status.json` (`{ts, runid, dest, done_verified}`); `make doctor` fails if sentinel age > 36 h [P]. Fix path: re-mount/enable → run `make backup` → confirm DONE appears. **(ii) L5/remote** — `drills/onedrive-readback.log` mtime older than 7 d [P] → operator reminder: manual web read-back due (M0 default) or Graph automation once **OQ-9** decides. `attrib` placeholder inspection is **negative-only** diagnosis (attribute set ⇒ provably not uploaded yet; cleared ⇒ still unproven), never a completion check. Promotions continue during staleness (git + MinIO tiers unaffected) but `backup_stale` surfaces in healthz (NFR-22 guard).
 - **R-9 Docker-daemon restart drill (RC-3):** `sudo systemctl restart docker` (host)
   with one synthetic job running ⇒ all containers return ⇒ reconcile log shows re-adopt or
   re-queue decisions per §8.6 ⇒ job completes, ledger gapless. Runs as part of M0 acceptance
@@ -1449,6 +1547,10 @@ verified before any M3 planning session, same discipline as C6.
 ## 17. Open Questions and Risks
 
 ### 17.1 Open questions (each: why it matters / who decides / when)
+
+> **Mirror note (r5):** OQ-8 (MinIO version-history fallback, §6.9.3/T-22) and OQ-9 (OneDrive L4/L5
+> upload-proof mechanism, §6.9.4) are registered in **ADR §4 only** — the ADR is the canonical
+> register (gate Q7 compares TD table rows ⊆ ADR); TD references them from §6.9 body text.
 | ID | Question | Why it matters | Decides | When |
 |----|----------|----------------|---------|------|
 | OQ-1 | Sign off ADR-D-02 posture (files-first + tripwires) — the only structural decision Phase 1 left *proposed*. | wrong-layer complexity if wrong | reviewer | design freeze |
@@ -1554,21 +1656,25 @@ sequenceDiagram
     A->>TS: GET /runs/{id} -> state, gate, evidence links
 ```
 
-### D8 — Backup & restore (T-11 / R-4 normalized)
+### D8 — Backup & restore (T-11 / R-4 normalized; §6.9 round-5 rewrite)
 ```mermaid
 sequenceDiagram
-    participant H as host ops (nightly mirror)
-    participant HD as heat-data
-    participant M as minio (versioned)
-    participant N as fresh/rebuilt env
-    Note over HD: steady state: runs + stack.db + ledger mirror + minio/ volume
-    H->>HD: mirror nightly -> OneDrive/Backup/HE-toolstack [RPO <= 24h, D-14]
-    Note over M: promoted objects carry MinIO version IDs (registry-linked)
-    N->>HD: restore from backup root (via WSL)
-    N->>M: make up (minio recovers from in-dir volume)
-    N->>M: GetObject(bucket,key,versionId) per registry evidence row
-    N->>N: sha256 compare vs registry digests (pass = restored)
-    N->>N: M0 smoke slice green = env trustworthy (R-4 done-check)
+    participant H as host ops timer robocopy driver
+    participant HD as heat-data ext4 authoritative
+    participant C as OneDrive root candidate then dated dir on NTFS
+    participant M as minio versioned bucket
+    participant N as fresh or rebuilt env
+    H->>HD: quiesce pause file then wait active jobs to zero else abort
+    H->>HD: sqlite online backup plus cp -a plus manifest into ext4 snapshot
+    H->>C: robocopy snapshot into candidate dir L2 local copy
+    H->>C: verify every destination digest then write DONE.json
+    H->>C: publish rename within NTFS volume into dated runid dir
+    Note over C: OneDrive upload completion NOT provable locally L4 L5 gap OQ-9 manual web read-back is the L5 evidence
+    H->>M: version export rclone s3-versions payloads plus mc ls versions manifest mc mirror withdrawn
+    N->>C: select newest dated dir with valid DONE.json restore reads canonical destination
+    N->>HD: restore DBs with integrity check plus artifacts with digest match via disposable copy
+    N->>M: minio recovers current payloads version restore by re-upload from export T-22 proof
+    N->>N: FR-37 reconciliation plus marker manifest HEAD checks plus L5 evidence per 9.6
 ```
 
 ### Appendix C — Document QA self-check

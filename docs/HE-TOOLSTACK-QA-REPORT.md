@@ -1,6 +1,6 @@
 # HE-toolstack Phase 2 — QA Verification Report
 
-**Document:** `docs/HE-TOOLSTACK-QA-REPORT.md` · v1.3 (rev 2026-11-15b: review-response 2
+**Document:** `docs/HE-TOOLSTACK-QA-REPORT.md` · v1.5 (rev 2026-11-16 r5: +Q24 backup-coherence gate; r5 rewrote backup mechanics and invalidated three r2 claims (see §3-r5); prior v1.3 (rev 2026-11-15b: review-response 2
 re-gate — 8 targeted corrections; +Q18…Q22) · r3 2026-11-16: +Q23 claim/ownership coherence; Q5/Q18/Q20/Q22 evidence refreshed (flock + submissions inbox) · 2026-11-14 (P2.5)
 **Method:** machine-checked where possible (scripts re-run against the repo at HEAD, not
 memory); manual where a human judgment is unavoidable (then stated as such). Baseline:
@@ -33,9 +33,11 @@ commit `b520931` (main); **v1.3 re-gate baseline = branch `review/architecture-r
 | Q20 | WAL wording [r2 item 4 / r3]: TD states WAL admits **one committer db-wide** with **no fairness guarantee**; ownership is convention, not DB enforcement; r3: no doc gives the toolserver a queue UPDATE any more (grep-verified; toolserver write path = INSERT `submissions` only) | **PASS** | "no fairness guarantee" present in TD §8.4 area |
 | Q21 | Lifecycle labels [r2 item 3]: REQ NFR-01 canonical lifecycle names `make down`; TD run-label `he-run` present | **PASS** | both strings grep-verified |
 | Q22 | Tests T-20 (flock claim race — ≥2 processes, exactly one winner, crash+retry), T-21 (stale-claim supersede/expiry), T-22 (MinIO version-history sufficiency through staging), T-23 (SQLite submission-inbox concurrency + crash matrix) are
+| Q23 | Claim/ownership coherence [r3]: no Toolserver queue-`UPDATE` grant remains in TD; §8.8 claim protocol = flock held lock (no rename-as-lock claim in normative text); §8.4b ownership table + submissions inbox present in TD and mirrored in ADR-D-08 A1 | **PASS** | gates_v13 Q23 |
+| Q24 | **Backup coherence [r5]:** (a) no live normative text asserts cross-filesystem atomic rename to the OneDrive root or `mc mirror` version-history preservation (history/withdrawn mentions allowed); (b) `--allow-active` appears ONLY beside withdrawn/negative language; (c) T-11 no longer affirmatively requires backup-while-jobs-run; (d) quiesce-and-wait §6.9.1, restore spec §9.6, L1–L5 ladder §6.9.4, ADR OQ-8 and OQ-9 all exist; (e) `DONE.json` never described as upload proof in normative text | **PASS** | gates_v13 Q24 (added this pass) |
 
-**Automated: 23/23 PASS** at the v1.4/r3 re-gate (Q1–Q23; Q3 runs external to the Python
-harness). Interim FAILs during this revision were again real defects caught by gates —
+**Automated: 24/24 PASS** at the v1.5/r5 re-gate (Q1–Q24; Q24 added after the round-5 backup-mechanic rewrite;
+r3's 23/23 stands for the flock/inbox layer; Q3 runs external to the Python harness). Interim FAILs during this revision were again real defects caught by gates —
 a dangling ref to a non-existent ADR record and a missing OQ-1 row in TD — each fixed and re-gated. Harness
 run recorded 2026-11-15b; Q13 path-sweep flags are legacy-context mentions explicitly marked as
 pre-ruling history (`/home/steven/backups` [E], PD-toolstack paths in Phase-1 evidence) —
@@ -62,6 +64,12 @@ not authoritative-destination claims.
    promoted into `scripts/qa/` at M0 — filed as FINDING-08 below (repo-`scripts/qa/` promotion; distinct from the GitHub-issue FINDING-08 numbering of the formal review).
 4. Review-cycle findings (REVIEW §8 FINDING-04..07) remain open *by design* pending
    owner decisions (OQ-1..6) and M0 execution.
+
+### r5 backup-claim invalidations (recorded, not hidden)
+
+- **Three r2/A1 mechanisms were false and are corrected in TD §6.9 (rewritten) + ADR-D-14 A2:** (1) atomic rename ext4→`/mnt/c` — impossible across filesystems → candidate + destination digest verify + NTFS-local publish rename; (2) `mc mirror` version-history preservation — vendor-documented as not preserved → §6.9.3 export design, falsifiable via T-22, fallback OQ-8 recorded **not adopted** (NFR-17 not silently weakened); (3) OneDrive completion via placeholder attributes — placeholder check is negative-only → L1–L5 ladder with the explicit statement that **no automated L4/L5 completion signal exists in this host environment today** (OQ-9); `DONE.json` demoted to L2 evidence.
+- **One normative contradiction removed:** NFR-22/T-11 "backup while jobs run" vs §6.9 refuse-mode — single policy **quiesce-and-wait**; `--allow-active` withdrawn (never existed in any release).
+- **Honesty floor:** no backup, drill, restore, or export has been executed — the stack is unbuilt. T-11/T-18/T-22 are *specified, not passed*; T-11's text now says so inline.
 
 ## 4. Residual actions
 
