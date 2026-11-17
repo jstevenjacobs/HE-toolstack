@@ -1,6 +1,6 @@
 # HE-toolstack Technical Design Document
 
-**Document:** `HE-TOOLSTACK-TECHNICAL-DESIGN.md` · v1.8 (rev 2026-11-17 r8: OQ-1 CLOSED — ADR-D-02 Accepted as written per operator ruling 2026-11-17; OQ/status mirrors updated. v1.7 r7 — network-isolation correction: bind-vs-publish separation made normative (§6.1/§11.3/§11.6), gateway client-URL probe retracted, six-leg T-15 isolation matrix referenced (§7.1/§10.1), Diagram 3 host-listener node fixed, D-15-accepted wording aligned; NOTE: the r6 ruling-record commit left this header line stale at v1.5 — caught in r7 recon; register flips themselves were verified at r6. Prior r5 rev: **round-5 backup corrections** — §6.9 rewritten (quiesce-and-wait §6.9.1; candidate→verify→DONE→NTFS-publish §6.9.2; MinIO version export §6.9.3 replacing the retracted mc-mirror-history claim; OneDrive L1–L5 proof ladder §6.9.4 with the explicit no-L4/L5-signal statement + OQ-8/OQ-9); §9.4 RPO reclassified local-completion; §9.6 restore-drill spec added; R-8 two-part staleness; D8 redrawn. Prior rev v1.4 (round-3 corrections — §8.8 ticket claim = flock(2) held-lock protocol; §7.5/§8.4b queue write-ownership resolved via submissions inbox. Earlier rev 2026-11-15b: review-response 2 — §6.2b normative spawn-sidecar API spec; §6.10 lifecycle classes + labels; §8.8 real claim mutual exclusion (O_EXCL lockfile arbiter); §6.7 WAL fairness corrected; §5.1 probe matrix re-run + Ollama bind finding [V]; D1/D2/D3/D4/D5/D8/D9 redrawn; prior v1.2: review response 1) · 2026-11-14
+**Document:** `HE-TOOLSTACK-TECHNICAL-DESIGN.md` · v1.9 (rev 2026-11-17 **r9 — lifecycle ownership + diagram semantics**: class-C canonical enumeration (5 core incl. spawn-sidecar); make-down 6-step choreography = HOST RECIPE not engine; janitor 3-duties/3-owners; class-X exclusion in zero-assertion; D1/D3/D4/D9 redrawn; superseded socket-alternative drawings removed. v1.8 (rev 2026-11-17 r8: OQ-1 CLOSED — ADR-D-02 Accepted as written per operator ruling 2026-11-17; OQ/status mirrors updated. v1.7 r7 — network-isolation correction: bind-vs-publish separation made normative (§6.1/§11.3/§11.6), gateway client-URL probe retracted, six-leg T-15 isolation matrix referenced (§7.1/§10.1), Diagram 3 host-listener node fixed, D-15-accepted wording aligned; NOTE: the r6 ruling-record commit left this header line stale at v1.5 — caught in r7 recon; register flips themselves were verified at r6. Prior r5 rev: **round-5 backup corrections** — §6.9 rewritten (quiesce-and-wait §6.9.1; candidate→verify→DONE→NTFS-publish §6.9.2; MinIO version export §6.9.3 replacing the retracted mc-mirror-history claim; OneDrive L1–L5 proof ladder §6.9.4 with the explicit no-L4/L5-signal statement + OQ-8/OQ-9); §9.4 RPO reclassified local-completion; §9.6 restore-drill spec added; R-8 two-part staleness; D8 redrawn. Prior rev v1.4 (round-3 corrections — §8.8 ticket claim = flock(2) held-lock protocol; §7.5/§8.4b queue write-ownership resolved via submissions inbox. Earlier rev 2026-11-15b: review-response 2 — §6.2b normative spawn-sidecar API spec; §6.10 lifecycle classes + labels; §8.8 real claim mutual exclusion (O_EXCL lockfile arbiter); §6.7 WAL fairness corrected; §5.1 probe matrix re-run + Ollama bind finding [V]; D1/D2/D3/D4/D5/D8/D9 redrawn; prior v1.2: review response 1) · 2026-11-14
 **Status:** Revised for re-review (DESIGN STATUS: CHANGES REQUESTED response package; Phase 2 deliverable A of DesignStandards §8)
 **Revision log (v1.2 → v1.3, r2 second-review items 1–8):** sidecar API normative spec §6.2b (operation-canonical paths; ADR/QA/TD synced); §8.8 claim = O_EXCL lockfile CAS (rename-CAS was the reviewer's item-3 objection, valid); WAL db-wide-write correction §6.7/§7.5; network probe matrix corrected + host-bind audit §5.1/§5.3/§6.4/D1/D4 (the hdi-refusal claim was over-generalized — fixed); backup: mc-mirror version-history + cross-fs transfer (mv-is-atomic claim only holds same-fs) §6.9; diagrams D1/D4 now show sidecar+gateway; lifecycle label triple normalized §6.10. (v1.1 → v1.2 adds review-§5.5 failure-class taxonomy (§12.5) + R-9 drill; §5.1 session/claim protocol §8.8; §5.2 durability matrix §5.4a; §5.4 security-boundary table §5.4b; §5.3 admission-soundness note §6.4; FM-11…13; T-17…19 refs; OQ-7; gateway-form client URL).**
 **Revision log (v1.1):** F1 client URL/bind topology (§5.1 D1, §6.4, §7.1); F2 lifecycle classes + §6.10 + D9; F3 spawn-sidecar §6.2/§10.1; F4 per-table writers §6.7/§7.5/§8.2/§8.4; F5 backup procedure §6.9/§12.2; F6 MinIO dependency semantics §6.1/§6.5/§7.2/§12.3; F7 201 contract + state boundaries §7.2/§8; F8 counts/refs across the package.
@@ -228,6 +228,7 @@ graph TB
             WE[workflow-engine<br/>queue+registry+runner]
             MO[minio :9000/:9001]
             JOB[per-job tool containers<br/>openfoam-esi / ta-solver-runtime /<br/>gmsh / calculix / agentcad / property-pipeline]
+            SC[spawn-sidecar<br/>sole docker.sock holder<br/>D-16 ACCEPTED 2026-11-16;<br/>root-equivalent if compromised]
         end
         HD[("heat-data host dir<br/>/home/steven/HE-toolstack/heat-data<br/>state+artifacts — D-05")]
         AG["agent / Hermes container<br/>(he client)"]
@@ -237,7 +238,8 @@ graph TB
         TS -- "INSERT INTO submissions ONLY<br/>(r3 inbox, §8.4b)" --> DB[(SQLite run_registry.db<br/>WAL; engine sole writer<br/>of queue + all else)]
         TS --> WE
         WE --> DB
-        WE -- "docker run (host engine)" --> JOB
+        WE -- "spawn/kill/status/logs<br/>(4-op HTTP, he-internal)" --> SC
+        SC -- "Docker API (sole socket holder)" --> JOB
         WE -- "promote (boto3)" --> MO
         JOB -- "nvidia runtime, flag-gated (C6)" --> GPU[(RTX 5060 Ti<br/>1 concurrent GPU job, ≤8 GiB)]
     end
@@ -310,9 +312,10 @@ graph TB
     subgraph WSL["WSL2 host JSJ-Office"]
         subgraph DE["Docker Engine (host)"]
             subgraph CP["compose project: he-toolstack"]
-                TSc[toolserver container<br/>user: non-root uid 1000]
-                WEc[workflow-engine container<br/>mounts heat-data + docker.sock-ALTERNATIVE]
-                MOc[minio container<br/>volume heat-data/minio]
+                TSc["toolserver container<br/>user: non-root uid 1000"]
+                WEc["workflow-engine container<br/>mounts heat-data rw<br/>NO Docker socket — D-16, FINDING-03"]
+                SCc["spawn-sidecar container<br/>sole /var/run/docker.sock holder<br/>D-16 ACCEPTED 2026-11-16"]
+                MOc["minio container<br/>volume heat-data/minio"]
             end
             J1[job container<br/>one-shot, network_mode none,<br/>bind: heat-data/runs/&lt;id&gt;/work]
         end
@@ -321,18 +324,22 @@ graph TB
     end
     TSc --- LB; WEc -- bind mount rw --> HDD
     J1 -- bind mount rw --> HDD; MOc -- bind mount rw --> HDD
-    WEc -. "spawn channel = OPEN QUESTION OQ-5 (§17.1):<br/>socket mount vs sidecar vs host unit" .-> J1
+    WEc -. "4-op HTTP over he-internal (D-16=B)" .-> SCc
+    SCc -- "Docker API (socket)" --> J1
 ```
-*Diagram 3 — deployment boundaries. The job-spawn channel is a tracked open design item
-(OQ-5 §17 / §6.2): mounting `docker.sock` is the known-simple path but grants container
-escape-class power; alternatives listed there rather than hand-waved.*
+*Diagram 3 — deployment boundaries (r9 redraw). The job-spawn channel was OQ-5; the operator
+ACCEPTED Option B (scoped spawn-sidecar, ADR-D-16, 2026-11-16) — shown as the current
+architecture. The honest residual is drawn with it: the sidecar is the sole socket holder and
+remains **root-equivalent on the host if compromised** — privilege redistribution, not
+elimination (D-16 ruling text). The superseded Option-A drawing (socket mounted into the
+engine as "ALTERNATIVE") is removed: the engine never sees a socket under any option.*
 
 ```mermaid
 graph LR
     AGENT[agent container<br/>default bridge +<br/>connected to he-agent net] -- "HTTP http://toolserver:8100<br/>(he-agent net member only; zero publish [V])" --> TS[toolserver]
     OPS[operator ssh :2222] -- "compose/CLI + :9001 console" --> STACK[compose project]
     TS -- "HTTP in-project :8200 (bridge he-net)" --> WE[workflow-engine]
-    WE -- "spawn: 4-op HTTP<br/>(sidecar holds docker.sock,<br/>OQ-5/D-16 Option B rec.)" --> SC[spawn-sidecar<br/>he-internal only] -- "Docker API (socket)" --> DE[host engine]
+    WE -- "spawn: 4-op HTTP<br/>(D-16 ACCEPTED 2026-11-16)" --> SC[spawn-sidecar<br/>he-internal only;<br/>sole docker.sock holder;<br/>root-equivalent if compromised] -- "Docker API (socket)" --> DE[host engine]
     WE -- "S3 API :9000 in-net" --> MO[minio]
     STACK -. "HTTPS outbound (git push only)" .-> GH[GitHub]
 ```
@@ -489,8 +496,7 @@ there is **none for 8100** (D-15 rev: zero published ports; exposure control is 
   `admission.py` (GPU budget fn: nvidia-smi-when-available + reservation ledger, FR-16/17;
   pure function, unit-tested with simulated values — T-06 — because C6 is unresolved),
   `worker_docker.py` (**the Worker seam**: `Worker.spawn(job_spec)->handle`; v1.1 per
-  FINDING-03: engine never sees a Docker socket under any option. Option B (recommended,
-  **operator decision pending**, ADR-D-16/§13.1): engine calls the `spawn-sidecar` HTTP API
+  FINDING-03: engine never sees a Docker socket under any option. Option B (**ACCEPTED — operator ruling 2026-11-16**, ADR-D-16): engine calls the `spawn-sidecar` HTTP API
   (the four operations of ADR-D-16 with **paths canonicalized to the operations**:
   `POST /v1/create_run`, `GET /v1/runs/{id}/status`, `POST /v1/runs/{id}/kill`,
   `GET /v1/runs/{id}/logs` — full spec §6.2b) over the `he-internal` net; expired-
@@ -534,7 +540,7 @@ there is **none for 8100** (D-15 rev: zero published ports; exposure control is 
   re-queues (idempotent step exec: step re-run sees its own artifact manifest and skips —
   FR-38); WAL survives kill -9 (NFR-02).
 - **Security:** sole holder of MinIO root creds (§10); sole writer to `workflows/`. Under
-  the recommended OQ-5=B shape the **security-critical container is the spawn-sidecar** (§10.1
+  the accepted OQ-5=B shape (operator ruling 2026-11-16) the **security-critical container is the spawn-sidecar** (§10.1
   threat model row; review gate), not the engine — engine compromise caps at queue/workflow
   integrity + sidecar-API abuse within the allow-list, not host root.
 - **Performance:** queue ops are sub-ms local SQLite [P, measure at M0]; step overhead
@@ -821,53 +827,87 @@ is NOT upload proof).**
 - `backup_stale` is two-part (§11.8 R-8): (i) no fresh `DONE.json` under `$ROOT` within cadence
   + grace → alarm (L2-level); (ii) no L5 evidence newer than **7 d** → operator reminder.
 
-### 6.10 Container lifecycle classes, shutdown, and the janitor  [FINDING-02, GitHub #3 — added 2026-11-15]
-- **Lifecycle owner of every container (normative; ADR-D-01 A1):**
-  - **Class C — compose services (6):** toolserver, workflow-engine, minio, he-scratch-keeper
-    (long-lived helpers stay ≤2), + registered tool images run *as services only if ever
-    long-lived* (none in M0). Compose owns create/start/stop/remove; `docker compose down`
-    removes exactly these.
-  - **Class J — one-shot job containers:** spawned by the engine through the OQ-5/D-16 spawn
-    channel with labels `he-stack=1`, `he-run=<id>`, `he-job-id=<id>`. Compose does **not** know them; the
-    engine owns their whole lifecycle: create → run → exit recorded to registry row →
-    `docker rm` by the janitor. Grace period: exited containers are kept ≤15 min [P] for
-    log-tail capture, then reaped.
-  - **Class X — host backup timer (§6.9):** systemd timer on the host, **declared
-    infrastructure exception** to compose ownership (D-01 A1). Never a compose resource, never
-    a stack dependency; its absence degrades backups, not execution.
-- **Shutdown sequence (normative; diagram D9):** `make down` = (1) engine receives SIGTERM →
-  stops claiming, sends SIGTERM to running class-J containers, records each as `interrupted`
-  in the registry (write-ahead), waits ≤ grace `SHUTDOWN_GRACE_S=60` [P] then force-kills +
-  records `killed`; (2) `docker compose down` stops class C; (3) janitor sweep removes any
-  label `he-stack=1` remnants (idempotent). Acceptance (T-13, revised): after `make down`,
-  `docker ps -a --filter label=he-stack=1` = **0 rows** — asserted over C∪J, which is how the
-  zero-container claim is now scoped (compose alone could never satisfy it for class J — the
-  v1.0 wording overstated, corrected).
-- **Crash/abandonment:** engine-boot reconciliation (§8.6) lists labeled containers vs
-  registry rows: container-without-row → reap; row-running-without-container → `interrupted`
-  → requeue (idempotent step re-entry, FR-38). Hourly janitor repeats the sweep; invariant
+### 6.10 Container lifecycle classes, shutdown, and the janitor  [FINDING-02, GitHub #3 — added 2026-11-15; r9 ownership rewrite]
+- **Canonical lifecycle classes (normative; ADR-D-01 A1). Exactly one lifecycle owner per
+  container; every stack-owned container carries the canonical ownership label `he-stack=1`:**
+  - **Class C — compose services (core 5):** `toolserver`, `workflow-engine`, `spawn-sidecar`
+    (D-16 ACCEPTED 2026-11-16 — sole `docker.sock` holder; §6.2b), `minio`,
+    `he-scratch-keeper`. Profile-conditional member: `gpu-probe` (added only by the `gpu`
+    compose profile, §11.3; not part of CPU-only M0 acceptance). The Hermes **agent container
+    is NOT class C** — it is a host-run external (§11.9), attached to `he-agent` as an
+    external network member. Compose owns class C create/start/stop/remove; `docker compose
+    down` removes **exactly and only** class C.
+  - **Class J — one-shot job containers:** created **by the engine** *through* the
+    spawn-sidecar API (creator = engine, via the sidecar's socket; §6.2b) with labels
+    `he-stack=1`, `he-run=<id>`, `he-job-id=<id>`. Compose never knows them. Registry owner =
+    the engine (every spawn writes a registry row; exit recorded to registry). Cleanup policy
+    = the **janitor** (duties and owners enumerated below): exited containers kept ≤15 min
+    [P] for log-tail capture, then reaped.
+  - **Class X — declared host-level infrastructure exceptions (§6.9, §11.9):** the backup
+    **systemd timer** on the host. Never a container at all, never a compose resource, never
+    a stack dependency; its absence degrades backups, not execution. **Class X is excluded
+    from every zero-container stack assertion** (it never appears in `docker ps`).
+- **The janitor — three duties, three owners (r9: no duty depends on a component that is
+  already stopped):**
+  1. **Steady-state reap:** the sidecar's own internal janitor timer reaps expired exited
+     class-J containers (label-matched) — engine-independent, runs while the stack is up.
+  2. **Startup sweep:** the sidecar sweeps label `he-stack=1` remnants on its own boot —
+     covers engine-crash and daemon-restart abandonment without the engine.
+  3. **`make down` final sweep:** executed **host-side by the `make down` recipe** (step 5
+     below) *before* class C is brought down further — completes even when the engine and
+     sidecar are dead or dying; implementation: `docker rm -f` over
+     `docker ps -aq --filter label=he-stack=1` minus live class-C ids.
+  Engine-boot **reconciliation** (§8.6) is a distinct duty of the engine: registry rows vs
+  labeled containers (container-without-row → ask sidecar to reap; row-running-without-
+  container → mark `interrupted` → requeue via idempotent step re-entry, FR-38). Invariant
   NFR-24 makes "container exists that no owner claims" a detectable defect, not a leak.
+- **`make down` — the COMPLETE stack shutdown (normative; diagram D9). It is a host-side
+  recipe (Makefile), not an engine-internal act — the engine never runs compose commands:**
+  1. **Stop new job claims:** `docker compose stop -t <grace> workflow-engine` sends SIGTERM;
+     the engine's handler stops claiming from the queue.
+  2. **Gracefully terminate active class-J jobs:** for each running job the engine calls the
+     sidecar `POST /v1/runs/{id}/kill` (SIGTERM); waits ≤ `TS_SHUTDOWN_GRACE_SECONDS=60` [P],
+     then re-issues kill.
+  3. **Record interruption/termination state:** engine writes `interrupted`/`killed` to the
+     registry **write-ahead, before it exits** (step 1's stop flag keeps the engine alive
+     through steps 2–3 — no step requires an already-stopped engine).
+  4. **Stop class C via Compose:** `docker compose down` removes the compose-managed
+     services (sidecar included, after the engine has drained).
+  5. **Reap remaining stack-owned class-J containers:** janitor duty 3, host-side,
+     engine-independent and sidecar-independent.
+  6. **Verify:** `docker ps -a --filter label=he-stack=1 -q` = **0 rows** (classes C∪J, incl.
+     job/one-shot orphans) **and** `docker compose ps -a` empty. **Class X is explicitly out
+     of scope of this assertion** — the host backup timer is not a stack container.
+  The bare `docker compose down` (step 4 alone) removes **only class C** compose-managed
+  resources — never complete stack shutdown; it remains an operator escape hatch whose class-J residue is
+  healed by janitor duties 1–2 + reconcile-on-start at next `make up`. `make down` is the
+  sole acceptance target (T-13/NFR-01/NFR-10).
 - **Recovery from daemon restart:** boot sequence runs reconciliation before serving.
 
-### D9 — Lifecycle & shutdown sequence (FINDING-02)
+### D9 — Lifecycle & shutdown sequence (FINDING-02; r9 redrawn to the D-16 boundary)
 ```mermaid
 sequenceDiagram
-    participant AG as agent
+    participant MD as make down (host CLI)
     participant WE as workflow-engine
+    participant SC as spawn-sidecar (sole socket)
     participant JB as job containers (class J)
     participant CP as compose (class C)
-    participant JL as janitor
-    AG->>WE: make down (SIGTERM)
-    WE->>WE: stop claiming new jobs
-    WE->>JB: SIGTERM running jobs
-    JB-->>WE: exit codes
-    WE->>WE: record interrupted/killed (write-ahead)
-    WE->>CP: docker compose down<br/>(class C only — class J already drained above)
-    CP->>CP: stop toolserver, engine, minio
-    JL->>JL: sweep label he-stack=1 remnants
-    Note over JL: docker ps -a label=he-stack=1 = 0 (T-13)
+    MD->>WE: step 1 compose stop -t grace<br/>SIGTERM: stop claiming
+    WE->>SC: step 2 POST /v1/runs/id kill<br/>(engine has NO socket, D-16)
+    SC->>JB: SIGTERM running jobs
+    JB-->>WE: exit codes via status/logs API
+    WE->>WE: step 3 record interrupted/killed<br/>write-ahead BEFORE exit
+    WE->>WE: engine exits (drained)
+    MD->>CP: step 4 docker compose down<br/>(removes class C only)
+    MD->>MD: step 5 host-side janitor sweep<br/>rm label he-stack=1 remnants<br/>(works with engine AND sidecar dead)
+    Note over MD: step 6 assert: docker ps -a filtered by label he-stack=1 returns zero<br/>covers class C and J — class X host backup timer is not a container
 ```
-*Diagram 9 — shutdown with running jobs. The backup timer (class X) is not in this flow: it is host infrastructure (D-01 A1).*
+*Diagram 9 — shutdown with running jobs (r9). Choreography is the host `make down` recipe;
+no step depends on an already-stopped engine, and jobs are killed through the sidecar
+because the engine holds no Docker socket (D-16 accepted 2026-11-16). The backup timer
+(class X) is host infrastructure outside this flow (D-01 A1) and outside the zero-container
+assertion.*
+
 ## 7. API and Interface Specifications
 
 ### 7.1 Conventions
@@ -940,7 +980,7 @@ and the p95 latency budget honest (NFR-04).
 - **engine → tool containers:** `docker run` equivalents from `job_types` rows: image by
   digest, `--network none`, binds `heat-data/runs/<id>/work`, env allowlist, cpu/mem
   limits, GPU device + nvidia runtime only when class enabled (FR-18). Exit code + captured
-  stdout/stderr tail (64 KiB) become artifact rows. **spawn channel = OQ-5.**
+  stdout/stderr tail (64 KiB) become artifact rows. **spawn channel = spawn-sidecar API (D-16 ACCEPTED 2026-11-16).**
 - **engine → MinIO:** boto3 (S3 API, in-net `minio:9000`), put+versioning, creds env-only.
 - **engine → git:** `git -c user…commit` + `push` on heat-data mirror; remote failure = local
   queue + retry each loop tick (A13).
@@ -1297,10 +1337,13 @@ mount healthy; Ollama embeddings live (co-resident check, informational); GPU pr
 ### 11.3 Compose topology [P — the normative file lives at `deploy/docker-compose.yml`]
 Services: `toolserver` (build `images/toolserver`; **no `ports:` entry for 8100 — zero host
 publication, D-15 Accepted**; attached to the dedicated `he-agent` network, §6.1/§11.6),
-`workflow-engine` (build `images/workflow-engine`, binds heat-data rw, OQ-5 spawn channel,
+`workflow-engine` (build `images/workflow-engine`, binds heat-data rw, spawn via sidecar API D-16,
 `depends_on: minio: service_started` — F6/ADR-D-17: NOT `service_healthy`; engine treats
 MinIO as an optional dependency and self-degrades promotion, §6.2), `minio` (image digest-pinned in MANIFEST, `pull_policy:
-never`, volume `./heat-data/minio`, ports `127.0.0.1:9000/9001` operator-only). Profiles:
+never`, volume `./heat-data/minio`, ports `127.0.0.1:9000/9001` operator-only), `spawn-sidecar` (D-16 accepted 2026-11-16: sole
+`/var/run/docker.sock` holder, `he-internal` only, digest-pinned allow-list, `cap_drop:
+ALL`, non-root; §6.2b), `he-scratch-keeper` (long-lived scratch reaper, §6.8; long-lived
+helpers stay ≤2). **Class-C canonical list = these 5 core services (TD §6.10).** Profiles:
 `gpu` (adds `gpu-probe` sidecar that samples nvidia-smi into heat-data/metrics/ when host
 passthrough verified — inert until C6), `console`, `postgres` (F-2 parked). Tool images are
 NOT compose services (one-shot spawns per job — §6.2) except none-run-daemons: correct —
@@ -1322,8 +1365,12 @@ where image supports (audit NFR-08), image pinned by **digest** not tag (T-16).
   non-member container (service name unresolvable + gateway :8100 refused, T-15 legs 2/3).
   The old gateway-URL probe is **RETRACTED** — it probed the retracted host-publish topology.
   Host-side curl remains supplementary, never the acceptance test (F1).
-- **Lifecycle labels (F2):** compose services get label `he-stack=1` + compose project label;
-  post-`make down` assertion `docker ps -a --filter label=he-stack=1 -q | wc -l` == 0 (T-13).
+- **Lifecycle labels (F2; canonical label `he-stack=1`):** compose services get label
+  `he-stack=1` + compose project label; class J gets `he-stack=1` + `he-run=<id>` +
+  `he-job-id=<id>` at sidecar spawn. Post-`make down` assertion (six-step sequence, §6.10):
+  `docker ps -a --filter label=he-stack=1 -q | wc -l` == 0 (classes C∪J; class X excluded —
+  host timer, not a container) **and** `docker compose ps -a` empty (T-13). Bare
+  `docker compose down` satisfies only the second half (class C) — never an acceptance target.
 
 
 ### 11.4 Configuration management
@@ -1402,6 +1449,18 @@ prohibition: no step a fresh session can't run blind)
   [new — review §5.5: daemon restart is a real WSL2 event class, never lumped with RC-1].
 
 ---
+
+### 11.9 Host-level externals (class X and non-stack containers) [r9 — closes the dangling §11.9 refs]
+Containers/units outside the compose project, each with exactly one non-compose owner:
+- **Backup timer (§6.9):** host **systemd timer** — lifecycle class **X** (D-01 A1). Not a
+  container; excluded from `docker ps` and from every zero-container stack assertion (T-13).
+- **Hermes agent container:** host-run (outside this compose project); lifecycle owner =
+  its own host runner. Joins `he-agent` as an external network member (§6.1) — membership,
+  not compose ownership.
+- **Inference containers (Ollama / SGLang):** co-resident host infrastructure, boundary
+  §2.6 — no runtime dependency claimed; not stack-owned, not in any stack assertion.
+`docker compose ls` therefore shows exactly **one** `he-toolstack` project; everything else
+is external by this table, never an unlabeled orphan (NFR-10).
 
 ## 12. Reliability and Failure Analysis
 
@@ -1665,7 +1724,7 @@ path. Tripwire: pre-agreed condition that converts "feels wrong" into a decision
 ### Appendix B — Diagram index (mermaid sources inline; 8 required views)
 D1 system context (§5.1) · D2 logical components (§5.2) · D3 deployment boundaries (§5.3) ·
 D4 network communication (§5.3) · D5 ticket lifecycle (§8.1) · D6 M0 flow (§8.3) ·
-D7 state-maintenance timeline (§D7 below) · D8 backup/restore sequence (§D8 below) · D9 lifecycle/shutdown (§6.10, v1.1).
+D7 state-maintenance timeline (§D7 below) · D8 backup/restore sequence (§D8 below) · D9 lifecycle/shutdown (§6.10, v1.1; **r9 redraw** to the six-step `make down` + D-16 spawn boundary). D1/D3/D4 carry r9 spawn-path redraws (D1 spawns via the accepted D-16 sidecar; D3 drops the legacy socket-exposure alternative and its open-question marker; D4 labels the accepted spawn edge).
 
 ### D7 — Data flow of one M0 run (write-ahead ordering visible end-to-end)
 ```mermaid

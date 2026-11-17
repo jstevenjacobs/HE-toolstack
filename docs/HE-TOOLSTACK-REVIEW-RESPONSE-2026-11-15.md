@@ -17,7 +17,7 @@ channel) are **requests for decision**, not assumed approvals.
 | Finding | Disposition | Where | Evidence / note |
 |---|---|---|---|
 | FINDING-01 — loopback/`host.docker.internal` networking claim unverifiable | **ACCEPTED — fixed with measured evidence** | REQ NFR-07 rewrite, FR-01 client URL; TD §6.4, §10 network rows; ADR-D-01 amendment + **new ADR-D-15 (operator decision requested)** | Live probe from inside a container: `172.17.0.1:8100` reachable; `host.docker.internal` resolved to `192.168.65.254` and got ConnectionRefused on loopback services. Design now specifies the bridge-gateway form + published-port pattern `127.0.0.1:PORT:PORT` (no `0.0.0.0` exposure — NFR-07 conflict removed). Final bind-address choice = **D-15, yours**. **[2026-11-16 r7 annotation: the "bridge-gateway form + published-port pattern" text in this row documented the RETRACTED pre-D-15 topology; superseded by D-15 Option D (zero publish, `he-agent` membership, client `http://toolserver:8100`) as ruled 2026-11-16 — see Appendix E/F and REQ NFR-07 r7.]** GitHub #2 |
-| FINDING-02 — container lifecycle ownership undefined | **ACCEPTED — fixed** | TD new §6.10 (lifecycle classes A/B/X), D9 diagram (validated), janitor rules, shutdown order, reconcile-on-start; REQ NFR-10 rewrite | Every container now has exactly one named owner across compose-managed / engine-spawned / host-timer classes; expired containers ≤15 min kept for log capture then reaped. GitHub #3 |
+| FINDING-02 — container lifecycle ownership undefined | **ACCEPTED — fixed** | TD new §6.10 (lifecycle classes **C/J/X** — r9: the earlier 'A/B/X' label in this row was terminology drift, corrected; TD/ADR/REQ canonical), D9 diagram (r9 redrawn to D-16 boundary + 6-step make down), janitor rules, shutdown order, reconcile-on-start; REQ NFR-10 rewrite | Every container now has exactly one named owner across compose-managed / engine-spawned / host-timer classes; expired containers ≤15 min kept for log capture then reaped. GitHub #3 |
 | FINDING-03 — Docker-socket privilege placement | **ACCEPTED — fixed; recommendation only, decision yours** | TD §6.2 (engine never sees a socket under any option), §5.4b security-boundary table, §13.1 spawn-seam code layout; **ADR-D-16 (3-option comparison, operator decision requested)** | Honest framing kept: a sidecar redistributes privilege, it does not remove it. Review §5.3 side-effect areas covered: uid alignment, audit logging, allow-list enforcement point. GitHub #4 |
 | FINDING-04 — SQLite single-writer claim vs read path | **ACCEPTED — fixed** | TD §6.7 writer-ownership table per DB, §8.8 claim protocol (BEGIN IMMEDIATE + version check), WAL mode stated; REQ NFR-09 amended | One writer per file, readers via WAL; concurrent-session claim race is now a specified protocol with test T-12 + property check. GitHub #5  **(r3 supersession: this row and the r2 §8.8 O_EXCL revision are both superseded — see Appendix C.)** |
 | FINDING-05 — backup atomicity/consistency (hot SQLite, OneDrive) | **ACCEPTED — fixed, then corrected r5** | TD new §6.9 host backup job (sqlite `.backup` API → staging → manifest → fsync → rename → DONE), RPO/RTO stated, OneDrive staleness alarm `backup_stale`; REQ NFR-22 amended, NFR-19 cross-ref; ADR-D-14 A1 amendment; T-18 drill | The review's durability demand is met with primitives named explicitly (`sqlite3 .backup`, fsync+atomic rename, write-ahead manifest ordering §5.4a). GitHub #6  GitHub #6  **(r5 correction: the A1 mechanism contained three false claims — cross-FS atomic rename, `mc mirror` version history, OneDrive placeholder-attribute sync proof — plus the §6.9-vs-NFR-22 active-job contradiction; all corrected in TD §6.9/§9.6 rewrite + ADR-D-14 A2. See Appendix D.)** |
@@ -406,3 +406,63 @@ force: no network configuration, firewall, Docker network, container, or deploym
 change was made or will be before approval; PR #11 stays open and unmerged.**
 
 **Operator acceptance (2026-11-17):** the operator ACCEPTED the r7 corrections as written ("r7 accepted") and CONFIRMED the NFR-16 mapping above — closing this appendix operator-side. NFR-07's satisfaction stays conditional on the T-15 six-leg matrix at M0 by the operator's own ruling; reviewer-independent re-review of v1.7 (if the reviewers issue one) remains their prerogative, and this acceptance is by the operator, not of the reviewers.
+
+## Appendix G — Round 9 (2026-11-17): lifecycle ownership + diagram semantics
+
+**Trigger:** operator brief "HE-toolstack correction — Lifecycle ownership and architecture
+diagrams" (docs-only, PR #11 branch).
+
+**Canonical lifecycle classes (as corrected):** **C** = compose-managed long-running
+services (canonical core 5: toolserver, workflow-engine, spawn-sidecar, minio,
+he-scratch-keeper; `gpu-probe` profile-conditional; the Hermes agent container is a host
+external, not class C). **J** = engine-owned one-shot job containers, created through the
+D-16 sidecar, labels `he-stack=1` + `he-run=<id>` + `he-job-id=<id>`. **X** = declared
+host-level infrastructure exceptions (backup systemd timer) — **not a container**, excluded
+from every zero-container stack assertion. Canonical ownership label: **`he-stack=1`** (the
+earlier `he-project` shorthand in NFR-10's verification text was the compose-project-name
+placeholder and is corrected to the project name `he-toolstack` / label filter).
+
+**`make down` = six-step complete shutdown (TD §6.10, D9 redrawn):** (1) stop new claims
+(compose stop SIGTERM to engine); (2) engine kills active class-J jobs **via the sidecar
+kill op** — the engine holds no socket (D-16); (3) engine records `interrupted`/`killed`
+write-ahead **before it exits** — no step depends on an already-stopped engine; (4) compose
+down (class C only); (5) **host-side** janitor reap (works with engine and sidecar dead);
+(6) verify zero label-`he-stack=1` containers (C∪J), class X excluded. Bare
+`docker compose down` = step 4 alone, class-C only — explicitly **not** complete shutdown,
+never an acceptance criterion (NFR-01).
+
+**Janitor ownership de-ambiguated (3 duties / 3 owners):** steady-state reap = sidecar
+timer; startup sweep = sidecar on boot; final sweep = `make down` recipe host-side.
+Engine-boot reconciliation (§8.6) is a separate engine duty.
+
+**Terminology drift corrected:** FINDING-02 disposition row said "classes A/B/X"; canonical
+is **C/J/X** (TD §6.10, ADR-D-01 A1, NFR-10). No other A/B/X usage existed.
+
+**FINDING-02 resolution claim:** the brief is right that the claim was not honest while
+NFR-01 accepted Compose-only shutdown. NFR-01 now requires the six-step `make down` and the
+correct label filter with the class-X exclusion stated; T-13's assertions extended. The
+ACCEPTED—fixed claim now matches the acceptance criteria.
+
+**Diagrams (semantic, not just syntactic):** D1 — spawn path now WE→sidecar→jobs (no
+"docker run (host engine)" edge from the engine); D3 — `docker.sock-ALTERNATIVE` and
+"OPEN QUESTION OQ-5" removed, spawn-sidecar drawn as the accepted boundary with its honest
+caveat (**sole socket holder; root-equivalent on the host if compromised — privilege
+redistribution, not elimination**); D4 — spawn edge labeled with the accepted ruling;
+D9 — full redraw to the six-step host choreography (old D9 had the engine running
+`docker compose down`, impossible post-D-16, and SIGTERMing jobs directly). Prose-vs-diagram
+cross-check done for D1/D3/D4/D9 against §6.2/§6.10/§11.3/§11.6 (Mermaid parse re-verified
+separately).
+
+**Discrepancy flagged for the operator (not silently reversed):** the round-9 brief asked
+to "retain the fact that ADR-D-16 remains Proposed." The register records **D-16 ACCEPTED —
+Option B by operator ruling 2026-11-16** (round 6, PR comment `issuecomment-6936366953`).
+Docs and diagrams follow the ruling (accepted, with the root-equivalence caveat drawn). If
+the intent was to RE-OPEN D-16, say so and it goes back to Proposed in a separate
+docs-only change.
+
+**Files changed this round:** TD v1.8→v1.9 (§6.10 rewrite, D9 redraw, §11.3 service list +
+labels prose, new §11.9 externals — closes dangling §11.9 refs); REQ v1.7→v1.8 (NFR-01
+six-step + class-X exclusion, NFR-10 janitor/spawn wording + project-name fix, T-13 rows);
+ADR v1.8→v1.9 (D-01 A1 core-5 enumeration, spawn path, `make down` restatement); this
+response (FINDING-02 row C/J/X, Appendix G). **STOP per §10 remains in force: no Makefile,
+compose, container, network, deployment, merge, or issue-closure action taken.**

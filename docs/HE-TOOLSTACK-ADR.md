@@ -1,6 +1,8 @@
 # HE-toolstack Architecture Decision Register (ADR)
 
-**Document:** `HE-TOOLSTACK-ADR.md` · v1.8 (rev 2026-11-17 r8: **OQ-1 RULED — ADR-D-02 Accepted as written per operator ruling; D-02 status line, X-2 and §4 row updated; r7 corrections + NFR-16 mapping accepted by operator.** v1.7 r7: r2-era filing-time lines annotated where superseded by the r6 rulings; records themselves unchanged. v1.6 r6: **operator rulings recorded** — D-15 approved as Option D (he-agent net), D-16 approved as Option B (spawn-sidecar), ADR-D-08 A1 accepted, OQ-9 ruled Option A (manual ritual), OQ-8 confirmed contingent-on-T-22; prior r5: ADR-D-14 **A2** — mirror-history + ADR-D-14 **A2** — mirror-history + atomic-cross-FS-rename + OneDrive-sync-status claims corrected, quiesce-and-wait policy ruled, OQ-8/OQ-9 opened; prior r3: ADR-D-08 A1 reworded to the submissions-inbox model (r2 per-table split withdrawn as self-contradictory); OQ-6 synced. Prior rev 2026-11-15b: review-response 2 — D-15 probe-matrix correction [V re-probe 15b], D-16 points at TD §6.2b normative API; prior v1.2: response 1 — D-01/D-08/D-14 A1, +D-15…D-18; prior v1.1: +D-14 backup root) · 2026-11-14
+**Document:** `HE-TOOLSTACK-ADR.md` · v1.9 (rev 2026-11-17 **r9 — lifecycle ownership**: D-01 A1 corrected — class-C canonical core 5
+  per TD §6.10 r9, spawn path via the D-16 sidecar, `make down` restated as the six-step host recipe;
+canonical label `he-stack=1`. Earlier v1.8 (rev 2026-11-17 r8: **OQ-1 RULED — ADR-D-02 Accepted as written per operator ruling; D-02 status line, X-2 and §4 row updated; r7 corrections + NFR-16 mapping accepted by operator.** v1.7 r7: r2-era filing-time lines annotated where superseded by the r6 rulings; records themselves unchanged. v1.6 r6: **operator rulings recorded** — D-15 approved as Option D (he-agent net), D-16 approved as Option B (spawn-sidecar), ADR-D-08 A1 accepted, OQ-9 ruled Option A (manual ritual), OQ-8 confirmed contingent-on-T-22; prior r5: ADR-D-14 **A2** — mirror-history + ADR-D-14 **A2** — mirror-history + atomic-cross-FS-rename + OneDrive-sync-status claims corrected, quiesce-and-wait policy ruled, OQ-8/OQ-9 opened; prior r3: ADR-D-08 A1 reworded to the submissions-inbox model (r2 per-table split withdrawn as self-contradictory); OQ-6 synced. Prior rev 2026-11-15b: review-response 2 — D-15 probe-matrix correction [V re-probe 15b], D-16 points at TD §6.2b normative API; prior v1.2: response 1 — D-01/D-08/D-14 A1, +D-15…D-18; prior v1.1: +D-14 backup root) · 2026-11-14
 **Status:** Living register (Phase 2 deliverable B of DesignStandards §8). Updates are ledger-
 backed commits; superseded ADRs stay visible with status `Superseded by …`.
 **Companion:** `HE-TOOLSTACK-TECHNICAL-DESIGN.md` §17 summarizes this register; requirement
@@ -37,15 +39,20 @@ Decision provenance classes, stated up front because reviewers must be able to a
 - **Risks:** compose-project growth temptation (solved by profiles, NFR-10); single project =
   one bad healthcheck can block `up` (mitigated: profiles + `depends_on` conditions).
 - **Amendment A1 (2026-11-15, FINDING-02, GitHub #3; supersedes the blanket "owns every
-  service" reading, decision history preserved):** compose owns the **long-running services**
-  (6 services incl. MinIO): start/stop/health/restart. **One-shot job containers are
-  engine-owned** — created through the Docker API with label `he-stack=1`, lifecycle class J
-  (§6.10): create→run→exit-record→janitor sweep; graceful shutdown SIGTERMs running jobs and
-  records `interrupted` *before* compose stops services. The **host backup timer is a declared
+  service" reading, decision history preserved; r9 — service enumeration, spawn path, and
+  `make down` choreography updated to the accepted D-15/D-16 architecture):** compose owns the **long-running services**
+  (class C — canonical core 5: toolserver, workflow-engine, spawn-sidecar (D-16), minio,
+  he-scratch-keeper; `gpu-probe` only under the `gpu` profile): start/stop/health/restart. **One-shot job containers are
+  engine-owned** — created through the Docker API *via the D-16 spawn-sidecar* (the engine
+  holds no socket) with labels `he-stack=1` + `he-run=<id>` + `he-job-id=<id>`, lifecycle
+  class J (§6.10): create→run→exit-record→janitor sweep (janitor duties/owners in §6.10 r9);
+  graceful shutdown SIGTERMs running jobs (through the sidecar kill op) and records
+  `interrupted` *before* the engine exits. The **host backup timer is a declared
   infrastructure exception** (class X, §6.9), never a stack dependency. `docker compose down`
-  removes only compose-managed containers — that is its real scope; `make down` = compose down
-  **+ janitor sweep**, and the zero-container acceptance (T-13) is asserted over classes C∪J
-  union. The architecture no longer claims compose owns what it does not manage.
+  removes only class-C containers — that is its real scope, never complete stack shutdown;
+  `make down` = the six-step sequence (§6.10 r9: stop claims → kill jobs via sidecar kill op →
+  record `interrupted` write-ahead → compose down (class C) → host-side reap → verify), and
+  the zero-container acceptance (T-13) is asserted over classes C∪J union, class X excluded. The architecture no longer claims compose owns what it does not manage.
 - **Revisit when:** stack outgrows one host (multi-node compose/swarm — not planned before
   M3+) or object store requirements exceed MinIO (none identified).
 - **References:** SA §infra + restore-drill rows; `pd-analysis/infra/minio-compose.yml` [E];
