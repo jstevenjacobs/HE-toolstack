@@ -1,6 +1,6 @@
 # HE-toolstack Architecture Decision Register (ADR)
 
-**Document:** `HE-TOOLSTACK-ADR.md` · v1.9 (rev 2026-11-17 **r9 — lifecycle ownership**: D-01 A1 corrected — class-C canonical core 5
+**Document:** `HE-TOOLSTACK-ADR.md` · v1.10 (rev 2026-11-17 **r10 — API-contract canonicalization**: D-16 A1/A2 (spawn-axis clarification; §6.2b path mapping locked; record open pending operator), D-17 canonical health trio (`/health` retired), D-18 A1 (`POST /jobs` body exactly `{job_id, queue_pos}`); previously r9 — lifecycle ownership: D-01 A1 corrected — class-C canonical core 5
   per TD §6.10 r9, spawn path via the D-16 sidecar, `make down` restated as the six-step host recipe;
 canonical label `he-stack=1`. Earlier v1.8 (rev 2026-11-17 r8: **OQ-1 RULED — ADR-D-02 Accepted as written per operator ruling; D-02 status line, X-2 and §4 row updated; r7 corrections + NFR-16 mapping accepted by operator.** v1.7 r7: r2-era filing-time lines annotated where superseded by the r6 rulings; records themselves unchanged. v1.6 r6: **operator rulings recorded** — D-15 approved as Option D (he-agent net), D-16 approved as Option B (spawn-sidecar), ADR-D-08 A1 accepted, OQ-9 ruled Option A (manual ritual), OQ-8 confirmed contingent-on-T-22; prior r5: ADR-D-14 **A2** — mirror-history + ADR-D-14 **A2** — mirror-history + atomic-cross-FS-rename + OneDrive-sync-status claims corrected, quiesce-and-wait policy ruled, OQ-8/OQ-9 opened; prior r3: ADR-D-08 A1 reworded to the submissions-inbox model (r2 per-table split withdrawn as self-contradictory); OQ-6 synced. Prior rev 2026-11-15b: review-response 2 — D-15 probe-matrix correction [V re-probe 15b], D-16 points at TD §6.2b normative API; prior v1.2: response 1 — D-01/D-08/D-14 A1, +D-15…D-18; prior v1.1: +D-14 backup root) · 2026-11-14
 **Status:** Living register (Phase 2 deliverable B of DesignStandards §8). Updates are ledger-
@@ -470,6 +470,22 @@ authority, marked Proposed pending the independent review.
   digest/limits per spawn). **This is a privilege arrangement and per review §7 it is the
   operator's call: A buys simplicity with maximal blast radius, C buys engine de-containerizing
   at the cost of D-01, B is recommended.**
+- **A1 (2026-11-17 r10):** clarification, not supersession. The round-9 OQ-1 ruling (RULED CLOSED —
+  files-first per ADR-D-02) governs the *workflow-state handoff* axis (engine↔toolserver artifact
+  and state exchange); it does **not** dissolve the *spawn-privilege* problem this record addresses:
+  the engine still needs solver containers started, and D-16 is where that privilege placement is
+  decided. The round-10 brief directs D-16 be kept **Proposed pending the operator's decision**;
+  the register separately records the round-6 ACCEPTED ruling (Option B) for audit — the conflict
+  is flagged to the operator in the round-10 PR note. This record stays open on either reading and
+  **nothing implements it before M0 exit**.
+- **A2 (2026-11-17 r10):** the four operations now have exact HTTP mapping in **TD §6.2b** (`POST
+  /v1/create_run`, `GET /v1/runs/<id>/status`, `POST /v1/runs/<id>/kill`, `GET /v1/runs/<id>/logs`) with normative
+  identity/authorization, idempotency, and timeout rows (paths locked r10 — earlier
+  `POST /v1/spawn` / bare-`GET /v1/runs/<id>` wanders are superseded by TD §6.2b verbatim).
+  **No `reap` operation is exposed** — reaping is the sidecar's internal janitor contract;
+  exposing one would require amending this ADR. Threat-model caveat stands: a compromised sidecar holds **root-equivalent Docker
+  privileges**; D-16 reduces the engine-reachable API surface, it does not eliminate host
+  privilege.
 - **Refs:** FINDING-03 (GitHub #4), OQ-5, §6.2/§13 (threat model), D-01/D-05/D-10 digest pins.
 
 ### ADR-D-17 — MinIO is an optional dependency for execution; required only for promotion (FINDING-06)
@@ -482,11 +498,14 @@ authority, marked Proposed pending the independent review.
   `promotion_queue`** (already in the schema — now normative): engine enqueues promotion
   intents transactionally with job completion, drains FIFO when MinIO returns; backlog
   survives any outage because it lives in the WAL DB on the authoritative disk (D-05).
-  Liveness vs dependency health separated in the API: `/healthz` = process liveness only;
-  `/health` = component map with MinIO `ok|unavailable` + `promotion_backlog` depth; per
-  NFR-23 (new) job/run payloads carry `evidence_available: bool`, and T-10 proves
-  `submitted → passed (promotion pending) → +promoted` across a kill-MinIO window.
-  toolserver `/health` reports the same map (single source: engine's).
+  Liveness vs dependency health separated in the API **(r10 canonical, supersedes the earlier
+  `/health` component-map wording — no `/health` endpoint exists)**: `GET /healthz` = process
+  liveness ONLY (never 503 for dependency state); `GET /readyz` = readiness for the served
+  operation — MinIO down NEVER makes the core solver path unready; `GET /deps` = detailed
+  per-dependency status incl. MinIO `ok|unavailable` and `promotion_backlog` depth. Full response
+  schemas + status codes: TD §7.2; toolserver reports the same map mirrored from the engine's
+  `/deps` (single source). Per NFR-23 job/run payloads carry `evidence_available: bool`, and
+  T-10 proves `submitted → passed (promotion pending) → +promoted` across a kill-MinIO window.
 - **Refs:** FINDING-06 (GitHub #7), NFR-08 (unchanged), NFR-23, FR-27, §6.1, §7.2, D5/D6.
 
 ### ADR-D-18 — One canonical API/state contract: HTTP 201 on POST /jobs; strict run⊃job boundaries (FINDING-07)
@@ -501,5 +520,9 @@ authority, marked Proposed pending the independent review.
   promotion** are run-scoped, not job states — the confusion surface FR-02 flagged. Physics
   completion ≠ evidence promotion, stated as the invariant: a run may be `passed` with
   `evidence_available=false` pending `promotion_queue` drain (ties to D-17). Error envelope +
-  error code table added §7.3 (previously scattered). **Refs:** FINDING-07 (GitHub #8), FR-01…03,
-  §7.2/§8, T-01, T-12, T-15.
+  error code table added §7.3 (previously scattered).
+- **A1 (2026-11-17 r10):** the TD §7.2 example's extra `state` field is WITHDRAWN — the normative
+  `POST /jobs` response body is exactly `{"job_id", "queue_pos"}`; idempotent replay returns the
+  same body with the original 201 (schema + replay semantics pinned in TD §7.2; fixtures TD §7.5).
+  T-08 asserts the exact key set; adding any field requires amending this record.
+- **Refs:** FINDING-07 (GitHub #8), FR-01…03, §7.2/§8, T-01, T-12, T-15.

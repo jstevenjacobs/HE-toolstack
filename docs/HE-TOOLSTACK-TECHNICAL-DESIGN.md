@@ -1,7 +1,8 @@
 # HE-toolstack Technical Design Document
 
-**Document:** `HE-TOOLSTACK-TECHNICAL-DESIGN.md` · v1.9 (rev 2026-11-17 **r9 — lifecycle ownership + diagram semantics**: class-C canonical enumeration (5 core incl. spawn-sidecar); make-down 6-step choreography = HOST RECIPE not engine; janitor 3-duties/3-owners; class-X exclusion in zero-assertion; D1/D3/D4/D9 redrawn; superseded socket-alternative drawings removed. v1.8 (rev 2026-11-17 r8: OQ-1 CLOSED — ADR-D-02 Accepted as written per operator ruling 2026-11-17; OQ/status mirrors updated. v1.7 r7 — network-isolation correction: bind-vs-publish separation made normative (§6.1/§11.3/§11.6), gateway client-URL probe retracted, six-leg T-15 isolation matrix referenced (§7.1/§10.1), Diagram 3 host-listener node fixed, D-15-accepted wording aligned; NOTE: the r6 ruling-record commit left this header line stale at v1.5 — caught in r7 recon; register flips themselves were verified at r6. Prior r5 rev: **round-5 backup corrections** — §6.9 rewritten (quiesce-and-wait §6.9.1; candidate→verify→DONE→NTFS-publish §6.9.2; MinIO version export §6.9.3 replacing the retracted mc-mirror-history claim; OneDrive L1–L5 proof ladder §6.9.4 with the explicit no-L4/L5-signal statement + OQ-8/OQ-9); §9.4 RPO reclassified local-completion; §9.6 restore-drill spec added; R-8 two-part staleness; D8 redrawn. Prior rev v1.4 (round-3 corrections — §8.8 ticket claim = flock(2) held-lock protocol; §7.5/§8.4b queue write-ownership resolved via submissions inbox. Earlier rev 2026-11-15b: review-response 2 — §6.2b normative spawn-sidecar API spec; §6.10 lifecycle classes + labels; §8.8 real claim mutual exclusion (O_EXCL lockfile arbiter); §6.7 WAL fairness corrected; §5.1 probe matrix re-run + Ollama bind finding [V]; D1/D2/D3/D4/D5/D8/D9 redrawn; prior v1.2: review response 1) · 2026-11-14
+**Document:** `HE-TOOLSTACK-TECHNICAL-DESIGN.md` · v1.10 (rev 2026-11-17 **r10 — health/job/sidecar API contracts** + v1.9 (rev 2026-11-17 **r9 — lifecycle ownership + diagram semantics**: class-C canonical enumeration (5 core incl. spawn-sidecar); make-down 6-step choreography = HOST RECIPE not engine; janitor 3-duties/3-owners; class-X exclusion in zero-assertion; D1/D3/D4/D9 redrawn; superseded socket-alternative drawings removed. v1.8 (rev 2026-11-17 r8: OQ-1 CLOSED — ADR-D-02 Accepted as written per operator ruling 2026-11-17; OQ/status mirrors updated. v1.7 r7 — network-isolation correction: bind-vs-publish separation made normative (§6.1/§11.3/§11.6), gateway client-URL probe retracted, six-leg T-15 isolation matrix referenced (§7.1/§10.1), Diagram 3 host-listener node fixed, D-15-accepted wording aligned; NOTE: the r6 ruling-record commit left this header line stale at v1.5 — caught in r7 recon; register flips themselves were verified at r6. Prior r5 rev: **round-5 backup corrections** — §6.9 rewritten (quiesce-and-wait §6.9.1; candidate→verify→DONE→NTFS-publish §6.9.2; MinIO version export §6.9.3 replacing the retracted mc-mirror-history claim; OneDrive L1–L5 proof ladder §6.9.4 with the explicit no-L4/L5-signal statement + OQ-8/OQ-9); §9.4 RPO reclassified local-completion; §9.6 restore-drill spec added; R-8 two-part staleness; D8 redrawn. Prior rev v1.4 (round-3 corrections — §8.8 ticket claim = flock(2) held-lock protocol; §7.5/§8.4b queue write-ownership resolved via submissions inbox. Earlier rev 2026-11-15b: review-response 2 — §6.2b normative spawn-sidecar API spec; §6.10 lifecycle classes + labels; §8.8 real claim mutual exclusion (O_EXCL lockfile arbiter); §6.7 WAL fairness corrected; §5.1 probe matrix re-run + Ollama bind finding [V]; D1/D2/D3/D4/D5/D8/D9 redrawn; prior v1.2: review response 1) · 2026-11-14
 **Status:** Revised for re-review (DESIGN STATUS: CHANGES REQUESTED response package; Phase 2 deliverable A of DesignStandards §8)
+**Revision log (v1.9 → v1.10, r10 health/contract canonicalization):** §7.2 `/healthz` pure-liveness row + `/readyz` + `/deps` rows + six-scenario canonical response table; non-normative `state` field removed from the 201 example (schema = exactly `{job_id, queue_pos}`); §6.2b cross-cutting rows (caller identity/audit, authz+root-equivalent caveat, idempotency, timeouts, explicit no-`reap`); §7.5 stray `/v1/jobs` paths → `/jobs`; §8.2 canonical four-state evidence ladder; `/health` retired from the normative set (NFR-23 canonical contract).
 **Revision log (v1.2 → v1.3, r2 second-review items 1–8):** sidecar API normative spec §6.2b (operation-canonical paths; ADR/QA/TD synced); §8.8 claim = O_EXCL lockfile CAS (rename-CAS was the reviewer's item-3 objection, valid); WAL db-wide-write correction §6.7/§7.5; network probe matrix corrected + host-bind audit §5.1/§5.3/§6.4/D1/D4 (the hdi-refusal claim was over-generalized — fixed); backup: mc-mirror version-history + cross-fs transfer (mv-is-atomic claim only holds same-fs) §6.9; diagrams D1/D4 now show sidecar+gateway; lifecycle label triple normalized §6.10. (v1.1 → v1.2 adds review-§5.5 failure-class taxonomy (§12.5) + R-9 drill; §5.1 session/claim protocol §8.8; §5.2 durability matrix §5.4a; §5.4 security-boundary table §5.4b; §5.3 admission-soundness note §6.4; FM-11…13; T-17…19 refs; OQ-7; gateway-form client URL).**
 **Revision log (v1.1):** F1 client URL/bind topology (§5.1 D1, §6.4, §7.1); F2 lifecycle classes + §6.10 + D9; F3 spawn-sidecar §6.2/§10.1; F4 per-table writers §6.7/§7.5/§8.2/§8.4; F5 backup procedure §6.9/§12.2; F6 MinIO dependency semantics §6.1/§6.5/§7.2/§12.3; F7 201 contract + state boundaries §7.2/§8; F8 counts/refs across the package.
 **Companions:** `HE-TOOLSTACK-REQUIREMENTS.md` (requirement IDs FR-xx/NFR-xx/T-xx/OR-xx),
@@ -472,7 +473,7 @@ there is **none for 8100** (D-15 rev: zero published ports; exposure control is 
 - **Startup/shutdown:** compose `depends_on: workflow-engine: condition: service_healthy`;
   boot = open WAL read/insert, serve; SIGTERM = drain in-flight HTTP (≤5 s), no job state to
   flush (all durable state is in SQLite WAL).
-- **Health/logging:** `/healthz` (DB open + writable check); JSON stdout logs with
+- **Health/logging (NFR-23 canonical):** `/healthz` = pure liveness (event loop serving; a DB-open failure is surfaced via `/readyz`/`/deps`, not liveness — r10 alignment); JSON stdout logs with
   `run_id/job_id` fields (NFR-13).
 - **Failure modes:** crash ⇒ zero data loss (stateless edge; agent retries with same
   idempotency key, FR-39); WAL lock contention with engine ⇒ single-writer ordering means
@@ -533,8 +534,9 @@ there is **none for 8100** (D-15 rev: zero published ports; exposure control is 
   sidecar's container-exists query is ground truth (state vs daemon, §6.2); mismatches
   resolve via the §8.6 matrix — never silently.
 - **Health/logging (v1.1 F6/NFR-23):** `/healthz` = **pure liveness** (loop heartbeat
-  <30 s old; never 503s for dependency loss); `/readyz` = readiness incl. dependency map
-  `{minio: ok|down, sidecar: ok|down|absent, docker: via-sidecar}`; queue-depth gauge in JSON logs;
+  <30 s old; never 503s for dependency loss); `/readyz` = readiness for required deps (DB + sidecar);
+  MinIO appears in `/deps` (`{minio: ok|down, sidecar: ok|down|absent, docker: via-sidecar, promotion_backlog: n}`)
+  but NEVER gates solver-execution readiness (D-17); queue-depth gauge in JSON logs;
   every state transition emits one structured event (run_id, from, to, cause).
 - **Failure modes/recovery:** full matrix T-05/T-07; crash mid-claim = lease timeout
   re-queues (idempotent step exec: step re-run sees its own artifact manifest and skips —
@@ -562,8 +564,12 @@ JSON; unknown fields `422`.
 | `kill` | `POST /v1/runs/{id}/kill` | `{signal: "term"|"kill", grace_s}` | `202` (idempotent: terminal → `200 already_terminal`) | `404` |
 | `logs` | `GET /v1/runs/{id}/logs?tail=N&since=` | — | `200 {lines[], truncated}` | `404`; `413` tail > 1 MiB |
 
-Reaping is **not** an operation: the sidecar's internal janitor removes exited containers
-after `SIDECAR_REAP_AFTER_S` (default 900 [P]) — engine never asks. Server-side enforcement
+**Cross-cutting contract rows (normative, r10):**
+- **Caller identity & audit:** `caller_id` = the `he-internal` peer token principal (shared-secret bearer until M0 mTLS, above); every call writes exactly one `sidecar_audit` row: `{ts, caller_id, op, run_id?, image_digest?, verdict, deny_reason?}`.
+- **Authorization / trust assumptions:** reach = `he-internal` membership (the only route to the port — same structural zero-publish pattern as D-15 for the toolserver); the sidecar trusts *reach*, then enforces server-side: digest allow-list, `network=none`, `cap_drop=ALL`+non-root user, bind-prefix allow-list (§6.2). Threat-model caveat **stands unchanged**: a compromised sidecar is still **root-equivalent** on the host — this API reduces the surface reachable from engine/toolserver; it does **not** eliminate host privilege (ADR-D-16).
+- **Idempotency:** `create_run` is **not idempotent** (caller-generated `he-job-id` label = dedup key: a second live container for the same `he-job-id` ⇒ `409 dup_run`); `status`/`logs` read-only idempotent; `kill` idempotent (terminal ⇒ `200 already_terminal`). No `Idempotency-Key` header applies below `/v1/` — the label scheme is the mechanism.
+- **Timeouts:** server answers `create_run`/`kill` ≤ 5 s (`create_run` returns at container-created; never waits for exit); `status`/`logs` ≤ 2 s; §7.1 client defaults apply (10 s + 3× backoff on 5xx/conn); sidecar's own docker-API deadline 5 s exceeded ⇒ `500 spawn_timeout`, any created container is reaped by the janitor like any orphan.
+- **No fifth operation:** reaping stays the sidecar's internal janitor duty (`SIDECAR_REAP_AFTER_S`, default 900 [P]) — **no engine-facing `reap` exists and none is added**; changing that would require an explicit ADR-D-16 amendment. Server-side enforcement
 matrix per operation = §6.2 contract paragraph; every call writes one `sidecar_audit` row
 (caller-id from `he-internal` peer cert/token, operation, digest, verdict). **QA gate:** the
 gate script extracts operation+path strings from TD/ADR/QA/REQ and asserts they equal this
@@ -930,7 +936,9 @@ are pointers, not bytes — §7.4); client default 10 s + 3 retries w/ backoff o
 ### 7.2 Endpoints [P — proposed contract; T-08 fixtures are the normative artifact]
 | Method | Path | Purpose | Auth | Idem | Success | Notable errors |
 |--------|------|---------|------|------|---------|----------------|
-| GET | `/healthz` | liveness (toolserver/healthz mirrors engine/minio reach) | — | — | 200 | 503 deps down |
+| GET | `/healthz` | **liveness only** — process alive + serving; dependency state NEVER reflected here or in its code (NFR-23) | — | — | 200 `"alive"` | 503 only when the process itself cannot serve |
+| GET | `/readyz` | **readiness for the operation requested**: toolserver requires DB+engine; engine requires DB+sidecar; **MinIO is NOT required for solver execution** (D-17) | loopback | — | 200 `{"ready":true}` | 503 `{"ready":false,"missing":[…]}` when a REQUIRED dep is down (never for MinIO) |
+| GET | `/deps` | **detailed dependency status** (200 whenever the process can answer; dep state lives in the body — canonical map below) | loopback | — | 200 `{deps:{engine,minio,sidecar,docker,db}, promotion_backlog:int}` | 503 only if the responder itself is down |
 | POST | `/jobs` | submit tool job `{tool, params, run_id?, vram_ceiling?, priority}` | loopback | ✔ | 201 `{job_id, queue_pos}` | 422 unknown tool/digest not in MANIFEST (`409 digest_unpinned`); 413 body>1 MiB; 429 queue-full (bound 200 [P]); 409 `backup_paused` during the §6.9.1 pause window |
 | GET | `/jobs/{id}` | status `{state, started?, finished?, exit?, gate?}` | loopback | — | 200 | 404 |
 | GET | `/jobs?state=&tool=&cursor=` | list/filter | loopback | — | 200 | — |
@@ -941,7 +949,18 @@ are pointers, not bytes — §7.4); client default 10 s + 3 retries w/ backoff o
 | POST | `/gate/run` | run gate for run `{run_id, checks?}` → exec §6.3 path | loopback | ✔ | 201 → job_id (async) | 409 run not in gateable state |
 | GET | `/candidates` / `/candidates/{run_id}` | registry queries + comparison `{metrics, gate, evidence[]}` | loopback | — | 200 | 404 |
 | GET | `/workflow/{flow}` | `workflows/<flow>/state.json` mirror (agent resume aid) | loopback | — | 200 | 404 |
-Example `POST /jobs`: req `{"tool":"gmsh","params":{"geo":"runs/r7/geom.step","hmax":0.4},"run_id":"r7"}` → 201 `{"job_id":"j-01H…","state":"queued","queue_pos":2}`.
+Example `POST /jobs`: req `{"tool":"gmsh","params":{"geo":"runs/r7/geom.step","hmax":0.4},"run_id":"r7"}` → **201 `{"job_id":"j-01H…","queue_pos":2}` — the normative body is EXACTLY `{job_id, queue_pos}` (FR-01/ADR-D-18); no `state` field (read it via `GET /jobs/{id}`). Idempotent replay returns the SAME body + SAME status + `Idempotent-Replay: true` (§7.1).
+
+**Health contract — canonical responses for the six scenarios** (NFR-23; T-08 fixtures; `/health` retired r10 — `/deps` is the component map):
+
+| Scenario | `/healthz` | `/readyz` | `/deps` body (engine view) |
+|----------|-----------|-----------|---------------------------|
+| 1 all deps healthy | 200 | 200 | `{engine:ok, minio:ok, sidecar:ok, docker:via-sidecar, db:ok}`, `promotion_backlog:0` |
+| 2 MinIO unavailable | 200 | **200 (solver execution NOT gated — D-17)** | `{minio:down, …}`, `promotion_backlog:n` |
+| 3 workflow engine unavailable (from toolserver) | 200 | **503** `{missing:[engine]}` | toolserver `/deps`: `{engine:down}` |
+| 4 toolserver unavailable | connection refused (agent-side retry, FR-35) | — | — |
+| 5 promotion backlog nonzero | 200 | 200 | `{minio:ok}`, `promotion_backlog:>0` (drain lag) |
+| 6 solver runs, promotion delayed | 200 | 200 | `{minio:ok|down}`, backlog>0; affected runs show `degraded-evidence` (§8.2) — **never `failed`** |
 
 ### 7.3 Error envelope (single shape everywhere)
 `{"error":{"code":"digest_unpinned","message":"image sha256:aa.. not in MANIFEST rev 0ed664b","details":{…},"trace_id":"t-…"}}` + matching HTTP class (4xx caller, 5xx stack). `trace_id` appears in server JSON logs (NFR-13 correlation).
@@ -960,7 +979,7 @@ and the p95 latency budget honest (NFR-04).
   `submissions(id, kind ∈ {submit,cancel,retry}, payload_json, idempotency_key UNIQUE,
   created_at, consumed_at NULL)`. The toolserver's **only write anywhere in the engine DB
   is `INSERT INTO submissions`** (submit/cancel/retry endpoints all land there; `POST
-  /v1/jobs` 400-checks schema first). The engine consumes: ONE `BEGIN IMMEDIATE`
+  /jobs` 400-checks schema first). The engine consumes: ONE `BEGIN IMMEDIATE`
   transaction — dedup `idempotency_key` against `idempotency_keys` (authoritative dedup
   happens HERE, engine-owned; the toolserver pre-insert check is a best-effort read, never
   a write) → `INSERT INTO queue` (+immutable job_spec snapshot) → `DELETE FROM submissions
@@ -971,7 +990,7 @@ and the p95 latency budget honest (NFR-04).
   visible, engine retries (idempotent via key); consumed ⇒ queue row exists in the SAME
   commit (half-consumed impossible); a queued job never double-executes because the sole
   dispatcher transitions `queued→admitted` under `BEGIN IMMEDIATE` + affected-rows==1
-  (§8.2 guards). Reads (`GET /v1/jobs/{id}`, queue, ledger, gate) = read-only SQL
+  (§8.2 guards). Reads (`GET /jobs/{id}`, queue, ledger, gate) = read-only SQL
   connections (WAL readers don't block the committer). Engine owns migrations
   (`schema_migrations`, additive-only pre-M1 [P]) + weekly `PRAGMA integrity_check`
   logged. Rejected alternatives (shared-table dual-writer = the r2 contradiction;
@@ -1035,7 +1054,7 @@ stateDiagram-v2
 Job: `queued → admitted → running → {succeeded | failed | cancelled}`, plus
 `degraded-evidence` (physics done, evidence step blocked — §6.5) and `stale-lease` (crash
 recovery re-queues, §8.6). Run: `created → active → gate_pending → {succeeded | failed} →
-promoted`; terminal states immutable. **Transition guards (DB triggers):** →`succeeded`
+promoted`; terminal states immutable. **Canonical evidence ladder (r10 — the four states named apart, never conflated):** (1) *solver execution completed* (worker exit 0) ≠ (2) *physics gate passed* (verdict, owner: engine gate step) ≠ (3) *evidence promotion pending* (`promotion_pending`/`degraded-evidence`, backlog row exists) ≠ (4) *evidence promoted* (`promoted`, versionId in registry). A run at (1)-(3) with physics green is **successful-with-pending-evidence, never a solver failure** (D-17; runs carry `evidence_available=false` while pending). **Transition guards (DB triggers):** →`succeeded`
 requires gate report with matching digests (§6.7); GPU-class jobs cannot leave `queued`
 while class flag off (FR-18); `admitted` commits the VRAM reservation atomically.
 
@@ -1253,7 +1272,7 @@ canonical destination, never the live source):
 8. **OneDrive read-back evidence (L5, §6.9.4):** attach current L5 artifact — M0 = signed manual
    web read-back log; Graph-based once OQ-9 decides. **No L5 evidence → drill is INCOMPLETE,
    not passed** (honesty rule; absence is a result, not a footnote).
-9. **Post-restart reconciliation:** `/health` + status endpoint answer; ledger parses; no orphan
+9. **Post-restart reconciliation:** `/readyz` + `/deps` + status endpoints answer; ledger parses; no orphan
    claimed (no live lease §8.8); evidence log closed with per-step pass/fail.
 
 **Acceptance criteria (conjunction):** integrity_check clean · destination digests == manifest ·

@@ -18,11 +18,11 @@ channel) are **requests for decision**, not assumed approvals.
 |---|---|---|---|
 | FINDING-01 — loopback/`host.docker.internal` networking claim unverifiable | **ACCEPTED — fixed with measured evidence** | REQ NFR-07 rewrite, FR-01 client URL; TD §6.4, §10 network rows; ADR-D-01 amendment + **new ADR-D-15 (operator decision requested)** | Live probe from inside a container: `172.17.0.1:8100` reachable; `host.docker.internal` resolved to `192.168.65.254` and got ConnectionRefused on loopback services. Design now specifies the bridge-gateway form + published-port pattern `127.0.0.1:PORT:PORT` (no `0.0.0.0` exposure — NFR-07 conflict removed). Final bind-address choice = **D-15, yours**. **[2026-11-16 r7 annotation: the "bridge-gateway form + published-port pattern" text in this row documented the RETRACTED pre-D-15 topology; superseded by D-15 Option D (zero publish, `he-agent` membership, client `http://toolserver:8100`) as ruled 2026-11-16 — see Appendix E/F and REQ NFR-07 r7.]** GitHub #2 |
 | FINDING-02 — container lifecycle ownership undefined | **ACCEPTED — fixed** | TD new §6.10 (lifecycle classes **C/J/X** — r9: the earlier 'A/B/X' label in this row was terminology drift, corrected; TD/ADR/REQ canonical), D9 diagram (r9 redrawn to D-16 boundary + 6-step make down), janitor rules, shutdown order, reconcile-on-start; REQ NFR-10 rewrite | Every container now has exactly one named owner across compose-managed / engine-spawned / host-timer classes; expired containers ≤15 min kept for log capture then reaped. GitHub #3 |
-| FINDING-03 — Docker-socket privilege placement | **ACCEPTED — fixed; recommendation only, decision yours** | TD §6.2 (engine never sees a socket under any option), §5.4b security-boundary table, §13.1 spawn-seam code layout; **ADR-D-16 (3-option comparison, operator decision requested)** | Honest framing kept: a sidecar redistributes privilege, it does not remove it. Review §5.3 side-effect areas covered: uid alignment, audit logging, allow-list enforcement point. GitHub #4 |
+| FINDING-03 — Docker-socket privilege placement | **ACCEPTED — fixed; recommendation only, decision yours** | TD §6.2 (engine never sees a socket under any option), §5.4b security-boundary table, §13.1 spawn-seam code layout; **ADR-D-16 (3-option comparison, operator decision requested; r10: §6.2b is now the locked four-operation normative table — exact method/path/request/response/error schemas plus identity/audit, authorization, idempotency and timeout rows; no `reap` operation, janitor internal)** | Honest framing kept: a sidecar redistributes privilege, it does not remove it. Review §5.3 side-effect areas covered: uid alignment, audit logging, allow-list enforcement point. GitHub #4 |
 | FINDING-04 — SQLite single-writer claim vs read path | **ACCEPTED — fixed** | TD §6.7 writer-ownership table per DB, §8.8 claim protocol (BEGIN IMMEDIATE + version check), WAL mode stated; REQ NFR-09 amended | One writer per file, readers via WAL; concurrent-session claim race is now a specified protocol with test T-12 + property check. GitHub #5  **(r3 supersession: this row and the r2 §8.8 O_EXCL revision are both superseded — see Appendix C.)** |
 | FINDING-05 — backup atomicity/consistency (hot SQLite, OneDrive) | **ACCEPTED — fixed, then corrected r5** | TD new §6.9 host backup job (sqlite `.backup` API → staging → manifest → fsync → rename → DONE), RPO/RTO stated, OneDrive staleness alarm `backup_stale`; REQ NFR-22 amended, NFR-19 cross-ref; ADR-D-14 A1 amendment; T-18 drill | The review's durability demand is met with primitives named explicitly (`sqlite3 .backup`, fsync+atomic rename, write-ahead manifest ordering §5.4a). GitHub #6  GitHub #6  **(r5 correction: the A1 mechanism contained three false claims — cross-FS atomic rename, `mc mirror` version history, OneDrive placeholder-attribute sync proof — plus the §6.9-vs-NFR-22 active-job contradiction; all corrected in TD §6.9/§9.6 rewrite + ADR-D-14 A2. See Appendix D.)** |
-| FINDING-06 — MinIO liveness conflated with dependency | **ACCEPTED — fixed** | TD §7 health model split `/healthz` vs `/readyz` vs `/deps`, §6.3 depends_on corrected (service_healthy only where truthful); REQ NFR-23 | MinIO is now an **optional dependency** (promotion/replay path), never a startup gate for the core loop; degradation is observable, not fatal. GitHub #7 |
-| FINDING-07 — 202-vs-201 queue-accept semantics | **ACCEPTED — fixed** | FR-01 rewritten to **201 Created** + `{job_id, queue_pos}` with contract suite (T-08); **ADR-D-18 (new record)**; he-client + status-model text aligned | Review §5 note honored: semantics fixed at the requirement level, not silently in a client shim. GitHub #8 |
+| FINDING-06 — MinIO liveness conflated with dependency | **ACCEPTED — fixed** | TD §7 health model split `/healthz` vs `/readyz` vs `/deps` (r10 canonical: `/healthz` liveness-only, `/readyz` never MinIO-gated, `/deps` = component map + backlog; `/health` retired; six-scenario response table §7.2), §6.3 depends_on corrected (service_healthy only where truthful); REQ NFR-23 | MinIO is now an **optional dependency** (promotion/replay path), never a startup gate for the core loop; degradation is observable, not fatal. GitHub #7 |
+| FINDING-07 — 202-vs-201 queue-accept semantics | **ACCEPTED — fixed** | FR-01 rewritten to **201 Created** + `{job_id, queue_pos}` with contract suite (T-08; r10: example body locked to exactly these two keys — stray `state` field withdrawn per D-18 A1; idempotent replay returns original body + 201); **ADR-D-18 (new record)**; he-client + status-model text aligned | Review §5 note honored: semantics fixed at the requirement level, not silently in a client shim. GitHub #8 |
 | FINDING-08 — ID-count / artifact mismatches across docs | **ACCEPTED — fixed + gated** | QA v1.2 gate Q16 (stale-token sweep) + Q4/Q5/Q15; DESIGN-REVIEW v1.1 counts; TD §14 "18 records" | Scripted gates now assert 66 requirement IDs, 19 tests, 9 diagrams, 18 ADR records — re-run, zero stale tokens. GitHub #9 |
 
 ## B. Review §5 independent areas (beyond the 8 findings)
@@ -149,8 +149,10 @@ O_EXCL claim path (state diagram re-checked). Verified: **9/9 parse under mermai
 Superseded `host.docker.internal`-as-trust-boundary edges removed.
 
 ## Correction 6 — Spawn-sidecar interface
-**Done.** One normative spec: TD §6.2b — `POST /v1/spawn` (`create_run`),
-`GET /v1/runs/{id}` (`status`), `POST /v1/runs/{id}/kill`, `GET /v1/runs/{id}/logs` —
+**Done.** One normative spec: TD §6.2b — `POST /v1/create_run` (`create_run`),
+`GET /v1/runs/{id}/status` (`status`), `POST /v1/runs/{id}/kill`, `GET /v1/runs/{id}/logs` —
+(r10: these paths + cross-cutting rows are the locked canonical table; earlier `/v1/spawn`
+wanding in this appendix is superseded by §6.2b verbatim.)
 4 ops, JSON, no auth (network membership = the control). ADR-D-16 and QA Q14 now point at
 §6.2b as the single source; every other mention is prose referring to it. Stale alias
 sweep (`POST /spawn`, bare `run/status/kill/logs` verb-lists, `run`+`status` combined path)
@@ -466,3 +468,50 @@ six-step + class-X exclusion, NFR-10 janitor/spawn wording + project-name fix, T
 ADR v1.8→v1.9 (D-01 A1 core-5 enumeration, spawn path, `make down` restatement); this
 response (FINDING-02 row C/J/X, Appendix G). **STOP per §10 remains in force: no Makefile,
 compose, container, network, deployment, merge, or issue-closure action taken.**
+
+
+---
+
+## Appendix H — Round 10 (2026-11-17): health, job-API, and spawn-sidecar contract canonicalization
+
+Documentation-only pass closing the last cross-document API drift, per operator brief:
+
+- **Health contract (Section A).** One canonical API everywhere: `GET /healthz` = process
+  liveness only (never dependency state, never 503 unless the process itself cannot serve);
+  `GET /readyz` = readiness for the operation served — **MinIO down never makes the core solver
+  path unready** (D-17 intent preserved); `GET /deps` = detailed per-dependency status incl.
+  MinIO `ok|unavailable` and `promotion_backlog` depth. `/health` **retired** — not kept as an
+  alias — `/deps` is the component map (TD §7.2, NFR-23, ADR-D-17 canonical amendment). Exact
+  response schemas + status codes for all six required scenarios tabled in TD §7.2, including
+  scenario 6 (solver runs, promotion delayed): `readyz=200`, affected runs flagged
+  `degraded-evidence`, **never `failed`**.
+- **POST /jobs (Section B).** Canonical response `201 Created` + exactly `{job_id, queue_pos}`
+  in REQ FR-01, TD §7.2 prose, JSON example, ADR-D-18, and T-08 fixtures; the example's extra
+  `state` field is withdrawn (D-18 A1) — adding any field now requires amending D-18.
+  Idempotent replay: same `Idempotency-Key` → original body + original 201 +
+  `Idempotent-Replay: true` header; replay never re-enqueues. 201 was not touched toward 202.
+- **Sidecar API (Section C).** TD §6.2b is the single normative four-operation table — `create_run`
+  = `POST /v1/create_run`, `status` = `GET /v1/runs/{id}/status`, `kill` =
+  `POST /v1/runs/{id}/kill`, `logs` = `GET /v1/runs/{id}/logs` — with request/response schemas,
+  error codes + statuses, caller identity & audit fields, authorization/trust assumptions,
+  idempotency, and timeouts as normative cross-cutting rows. **No engine-facing `reap` exists**:
+  reaping stays the sidecar's internal janitor (`SIDECAR_REAP_AFTER_S`); exposing one would
+  require amending D-16, and none was added. Threat-model caveat stands verbatim: compromised
+  sidecar = root-equivalent Docker privileges; D-16 reduces the engine-reachable surface, it does
+  not eliminate host privilege.
+- **Degradation semantics (Section D).** TD §8.2 canonical evidence ladder names the four states
+  apart — solver execution completed → physics gate passed → promotion pending → promoted — and
+  states that physics-passed-with-promotion-pending is never represented as solver failure.
+- **D-16 status — open question for the operator.** This brief directs D-16 stay *Proposed
+  pending Steven's decision*; the register records the round-6 ACCEPTED ruling (Option B). The
+  ADR now carries both facts transparently (D-16 A1) and stays open on either reading; nothing
+  implements the sidecar before M0 exit.
+- **New gate:** QA Q28 (API-contract coherence, seven assertions incl. cross-doc health-endpoint
+  set, locked example body, no-reap, six-scenario table, replay wording). Suite 27/27 PASS.
+
+**Files changed this round:** TD v1.9→v1.10 (§7.2 rewrite + six-scenario table, example schema,
+§6.2b cross-cutting rows, §7.5 path-drift fix, §8.2 ladder, §9.4/§9.6 wording); REQ v1.8→v1.9
+(NFR-23 canonical, FR-01/FR-04 replay wording, T-08/T-10 remap); ADR v1.9→v1.10 (D-16 A1/A2,
+D-17 canonical, D-18 A1); this response (FINDING-03/06/07 rows, Correction 6 paths, Appendix H);
+QA v1.9→v2.0 (+Q28). **STOP per §10 remains in force: no API implementation, application code,
+deployment, D-16 approval, merge, or issue-closure action taken.**
