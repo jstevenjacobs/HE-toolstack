@@ -1,6 +1,6 @@
 # HE-toolstack Technical Design Document
 
-**Document:** `HE-TOOLSTACK-TECHNICAL-DESIGN.md` · v1.7 (rev 2026-11-16 **r7 — network-isolation correction**: bind-vs-publish separation made normative (§6.1/§11.3/§11.6), gateway client-URL probe retracted, six-leg T-15 isolation matrix referenced (§7.1/§10.1), Diagram 3 host-listener node fixed, D-15-accepted wording aligned; NOTE: the r6 ruling-record commit left this header line stale at v1.5 — caught in r7 recon; register flips themselves were verified at r6. Prior r5 rev: **round-5 backup corrections** — §6.9 rewritten (quiesce-and-wait §6.9.1; candidate→verify→DONE→NTFS-publish §6.9.2; MinIO version export §6.9.3 replacing the retracted mc-mirror-history claim; OneDrive L1–L5 proof ladder §6.9.4 with the explicit no-L4/L5-signal statement + OQ-8/OQ-9); §9.4 RPO reclassified local-completion; §9.6 restore-drill spec added; R-8 two-part staleness; D8 redrawn. Prior rev v1.4 (round-3 corrections — §8.8 ticket claim = flock(2) held-lock protocol; §7.5/§8.4b queue write-ownership resolved via submissions inbox. Earlier rev 2026-11-15b: review-response 2 — §6.2b normative spawn-sidecar API spec; §6.10 lifecycle classes + labels; §8.8 real claim mutual exclusion (O_EXCL lockfile arbiter); §6.7 WAL fairness corrected; §5.1 probe matrix re-run + Ollama bind finding [V]; D1/D2/D3/D4/D5/D8/D9 redrawn; prior v1.2: review response 1) · 2026-11-14
+**Document:** `HE-TOOLSTACK-TECHNICAL-DESIGN.md` · v1.8 (rev 2026-11-17 r8: OQ-1 CLOSED — ADR-D-02 Accepted as written per operator ruling 2026-11-17; OQ/status mirrors updated. v1.7 r7 — network-isolation correction: bind-vs-publish separation made normative (§6.1/§11.3/§11.6), gateway client-URL probe retracted, six-leg T-15 isolation matrix referenced (§7.1/§10.1), Diagram 3 host-listener node fixed, D-15-accepted wording aligned; NOTE: the r6 ruling-record commit left this header line stale at v1.5 — caught in r7 recon; register flips themselves were verified at r6. Prior r5 rev: **round-5 backup corrections** — §6.9 rewritten (quiesce-and-wait §6.9.1; candidate→verify→DONE→NTFS-publish §6.9.2; MinIO version export §6.9.3 replacing the retracted mc-mirror-history claim; OneDrive L1–L5 proof ladder §6.9.4 with the explicit no-L4/L5-signal statement + OQ-8/OQ-9); §9.4 RPO reclassified local-completion; §9.6 restore-drill spec added; R-8 two-part staleness; D8 redrawn. Prior rev v1.4 (round-3 corrections — §8.8 ticket claim = flock(2) held-lock protocol; §7.5/§8.4b queue write-ownership resolved via submissions inbox. Earlier rev 2026-11-15b: review-response 2 — §6.2b normative spawn-sidecar API spec; §6.10 lifecycle classes + labels; §8.8 real claim mutual exclusion (O_EXCL lockfile arbiter); §6.7 WAL fairness corrected; §5.1 probe matrix re-run + Ollama bind finding [V]; D1/D2/D3/D4/D5/D8/D9 redrawn; prior v1.2: review response 1) · 2026-11-14
 **Status:** Revised for re-review (DESIGN STATUS: CHANGES REQUESTED response package; Phase 2 deliverable A of DesignStandards §8)
 **Revision log (v1.2 → v1.3, r2 second-review items 1–8):** sidecar API normative spec §6.2b (operation-canonical paths; ADR/QA/TD synced); §8.8 claim = O_EXCL lockfile CAS (rename-CAS was the reviewer's item-3 objection, valid); WAL db-wide-write correction §6.7/§7.5; network probe matrix corrected + host-bind audit §5.1/§5.3/§6.4/D1/D4 (the hdi-refusal claim was over-generalized — fixed); backup: mc-mirror version-history + cross-fs transfer (mv-is-atomic claim only holds same-fs) §6.9; diagrams D1/D4 now show sidecar+gateway; lifecycle label triple normalized §6.10. (v1.1 → v1.2 adds review-§5.5 failure-class taxonomy (§12.5) + R-9 drill; §5.1 session/claim protocol §8.8; §5.2 durability matrix §5.4a; §5.4 security-boundary table §5.4b; §5.3 admission-soundness note §6.4; FM-11…13; T-17…19 refs; OQ-7; gateway-form client URL).**
 **Revision log (v1.1):** F1 client URL/bind topology (§5.1 D1, §6.4, §7.1); F2 lifecycle classes + §6.10 + D9; F3 spawn-sidecar §6.2/§10.1; F4 per-table writers §6.7/§7.5/§8.2/§8.4; F5 backup procedure §6.9/§12.2; F6 MinIO dependency semantics §6.1/§6.5/§7.2/§12.3; F7 201 contract + state boundaries §7.2/§8; F8 counts/refs across the package.
@@ -63,7 +63,7 @@ acceptance artifact); host-disk SPOF (versioned MinIO tier is the copy); phantom
 recurrence (every §6 component lists its *existing* code lineage or is marked [P]).
 
 **Readiness.** Architecture is review-ready: requirements baselined (v1.3: 66 IDs, 100%
-trace-mapped), 17 ADR records (10 Accepted after the 2026-11-16 operator rulings — D-15 Option D, D-16 Option B, D-08+Amendment A1, plus earlier rulings D-01/D-03/D-04/D-05/D-09/D-12/D-14; D-02/D-06/D-07/D-11/D-17/D-18 remain Proposed),
+trace-mapped), 17 ADR records (11 Accepted after the 2026-11-16/17 operator rulings — D-15 Option D, D-16 Option B, D-08+Amendment A1, **D-02 as written (OQ-1 closed 2026-11-17)**, plus earlier rulings D-01/D-03/D-04/D-05/D-09/D-12/D-14; D-06/D-07/D-11/D-17/D-18 remain Proposed),
 open questions surfaced (OQ-1…7). No milestone's acceptance depends on an unverified premise.
 
 ---
@@ -1556,7 +1556,7 @@ pass, digests match E-ledger values [E]) + **T-07** crash-matrix pass (required 
 artifact, D-02 honesty condition) + **T-13** zero-orphan + **OR-01 timing recorded** (<10 min
 target — measured, reported, not claimed). *Cleanup:* scratch dirs pruned, no stray
 containers/images post-suite, `make down` clean. *Exit gate:* all above green + fresh-session
-resume smoke (mini-T-02). [no date claim — sequencing: after OQ-1/OQ-4 sign-off and OQ-5 resolution].
+resume smoke (mini-T-02). [no date claim — sequencing: after OQ-4 sign-off (OQ-1 closed 2026-11-17, OQ-5 resolved 2026-11-16)].
 
 **M1 — breadth: 6 tool classes + registry.** *Adds:* openfoam-esi/gmsh/calculix/agentcad job
 types, registry + gate-verification triggers, sweep comparison queries, candidate A/B
@@ -1591,7 +1591,7 @@ verified before any M3 planning session, same discipline as C6.
 > register (gate Q7 compares TD table rows ⊆ ADR); TD references them from §6.9 body text.
 | ID | Question | Why it matters | Decides | When |
 |----|----------|----------------|---------|------|
-| OQ-1 | Sign off ADR-D-02 posture (files-first + tripwires) — the only structural decision Phase 1 left *proposed*. | wrong-layer complexity if wrong | reviewer | design freeze |
+| OQ-1 | **RULED 2026-11-17 — CLOSED: operator accepted ADR-D-02 as written ("OQ-1 accepted as written") — files-first + ~200-line runner + tripwires stands.** | wrong-layer complexity if wrong | ~~reviewer~~ operator | ~~design freeze~~ satisfied |
 | OQ-2 | GPU VRAM ceiling/floor final values (D-04 defaults 8/5.5 GiB) + C6 re-measure ticket execution | gates `GPU_CLASS_ENABLED`; numbers are safety margins for co-resident LLM services | operator (Steven) w/ measured nvidia-smi data | before GPU profile activates; **not** blocking M0–M2 (FR-19) |
 | OQ-3 | PD-toolstack D-ledger historical import: which candidate rows are worth mining into the registry? | free provenance for sweeps vs migrating attempt-1 cruft | operator + agent triage pass | during M1 (registry live) |
 | OQ-4 | physics-gate endpoint wrapper (D-06) + registry/SQLite colocation (D-08) acceptance. | M0 design freeze | reviewer | design freeze |
@@ -1623,7 +1623,7 @@ runbooks R-1…**9**; durability contract explicit (§5.4a); security boundaries
 honestly:** performance numbers remain targets (stack unbuilt — stated, not hidden); §13.1
 payload/poll assumptions stay [U] until T-08 measures; diagrams D1–D9 are design views.
 **External input needed (v1.2):** OQ-5/D-16 spawn-channel ruling (M0 blocker), D-15 bind
-topology accept, D-08 A1 + D-17/D-18 accepts, OQ-2 timing (non-blocking), OQ-1/OQ-4 sign-off.
+topology accept, D-08 A1 + D-17/D-18 accepts, OQ-2 timing (non-blocking), OQ-1/OQ-4 sign-off **(v1.8 update: OQ-1 CLOSED 2026-11-17 — D-02 accepted as written; D-15/D-16/D-08 ruled 2026-11-16)**. This 2026-11-15 line is otherwise retained as filing-time text.
 **Verdict (proposed): APPROVE WITH EXCEPTIONS** — structure complete and internally
 consistent; the named exceptions are the operator decisions above, each with a filed ADR,
 alternatives, and a recommendation; D-16 gates M0 build start by design.

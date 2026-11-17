@@ -1,6 +1,6 @@
 # HE-toolstack Architecture Decision Register (ADR)
 
-**Document:** `HE-TOOLSTACK-ADR.md` · v1.7 (rev 2026-11-16 r7: r2-era filing-time lines annotated where superseded by the r6 rulings; records themselves unchanged. v1.6 r6: **operator rulings recorded** — D-15 approved as Option D (he-agent net), D-16 approved as Option B (spawn-sidecar), ADR-D-08 A1 accepted, OQ-9 ruled Option A (manual ritual), OQ-8 confirmed contingent-on-T-22; prior r5: ADR-D-14 **A2** — mirror-history + ADR-D-14 **A2** — mirror-history + atomic-cross-FS-rename + OneDrive-sync-status claims corrected, quiesce-and-wait policy ruled, OQ-8/OQ-9 opened; prior r3: ADR-D-08 A1 reworded to the submissions-inbox model (r2 per-table split withdrawn as self-contradictory); OQ-6 synced. Prior rev 2026-11-15b: review-response 2 — D-15 probe-matrix correction [V re-probe 15b], D-16 points at TD §6.2b normative API; prior v1.2: response 1 — D-01/D-08/D-14 A1, +D-15…D-18; prior v1.1: +D-14 backup root) · 2026-11-14
+**Document:** `HE-TOOLSTACK-ADR.md` · v1.8 (rev 2026-11-17 r8: **OQ-1 RULED — ADR-D-02 Accepted as written per operator ruling; D-02 status line, X-2 and §4 row updated; r7 corrections + NFR-16 mapping accepted by operator.** v1.7 r7: r2-era filing-time lines annotated where superseded by the r6 rulings; records themselves unchanged. v1.6 r6: **operator rulings recorded** — D-15 approved as Option D (he-agent net), D-16 approved as Option B (spawn-sidecar), ADR-D-08 A1 accepted, OQ-9 ruled Option A (manual ritual), OQ-8 confirmed contingent-on-T-22; prior r5: ADR-D-14 **A2** — mirror-history + ADR-D-14 **A2** — mirror-history + atomic-cross-FS-rename + OneDrive-sync-status claims corrected, quiesce-and-wait policy ruled, OQ-8/OQ-9 opened; prior r3: ADR-D-08 A1 reworded to the submissions-inbox model (r2 per-table split withdrawn as self-contradictory); OQ-6 synced. Prior rev 2026-11-15b: review-response 2 — D-15 probe-matrix correction [V re-probe 15b], D-16 points at TD §6.2b normative API; prior v1.2: response 1 — D-01/D-08/D-14 A1, +D-15…D-18; prior v1.1: +D-14 backup root) · 2026-11-14
 **Status:** Living register (Phase 2 deliverable B of DesignStandards §8). Updates are ledger-
 backed commits; superseded ADRs stay visible with status `Superseded by …`.
 **Companion:** `HE-TOOLSTACK-TECHNICAL-DESIGN.md` §17 summarizes this register; requirement
@@ -52,7 +52,7 @@ Decision provenance classes, stated up front because reviewers must be able to a
   P1 §4 C4; NFR-01/10, FR-29/T-11/T-13.
 
 ### ADR-D-02 — Workflow control = externalized files + ~200-line runner; no orchestration framework in the initial release
-- **Status:** **Proposed** (awaiting explicit sign-off — see §4 OQ-1)
+- **Status:** **Accepted — operator ruling 2026-11-17 (OQ-1 closed: "OQ-1 accepted as written"; the named tripwires are retained as part of the acceptance and re-fire re-evaluation toward a framework).**
 - **Context:** v3 leaned toward LangGraph; research during the pivot (session
   `20261114_133606_df5042`) established: LangGraph's self-healing resume requires
   *durable-execution* infrastructure (Temporal-class platform) the stack does not have; the
@@ -287,7 +287,7 @@ Decision provenance classes, stated up front because reviewers must be able to a
 | Alt | Rejected alternative | Rejected by | One-line reason |
 |-----|---------------------|-------------|-----------------|
 | X-1 | Rebuild gpu-broker as a service | D-03 (ruling honored) | justification was multi-host leases; single host doesn't need it |
-| X-2 | LangGraph/Temporal as workflow engine | D-02 (pending final OQ-1) | resume-from-context-loss is a checkpoint pattern; platform cost outweighs function now |
+| X-2 | LangGraph/Temporal as workflow engine | **D-02 (Accepted as written, OQ-1 closed 2026-11-17)** | resume-from-context-loss is a checkpoint pattern; platform cost outweighs function now |
 | X-3 | Consolidate images ≤4 | **D-10 user ruling** | narrow scope = adaptability; blast radius per digest |
 | X-4 | GPU-exclusive mode | D-04 | evicts embeddings = self-inflicted memory outage |
 | X-5 | MinIO as hot solver store | D-05 | network hop in hot path; wrong shape for step files |
@@ -357,7 +357,7 @@ Decision provenance classes, stated up front because reviewers must be able to a
 
 | OQ | Question | Needed by |
 |----|----------|-----------|
-| OQ-1 | Sign off ADR-D-02 posture (files-first + tripwires) — the only structural decision Phase 1 left *proposed*. | M0 design freeze |
+| OQ-1 | **RULED 2026-11-17 — CLOSED: operator accepted ADR-D-02 as written ("OQ-1 accepted as written") — files-first + ~200-line runner + tripwires stands.** | ~~M0 design freeze~~ satisfied |
 | OQ-2 | Confirm/adjust D-04 numbers at review with C6 data. **2026-11-15 (review §5.3): static reservation alone is inadequate on a SHARED GPU — §6.8 adds a runtime used-memory re-check at dispatch + cuda-use-gate container on the device; GPU admission stays disabled until C6 passes; the accepted sharing decision (D-04) is unchanged.** | GPU-class enablement |
 | OQ-3 | Migration stance detail: PD-toolstack evidence repos stay frozen (user ruling says source-of-information only — confirm *read-only mirror* vs *do-not-touch* for the copy-into-registry step, ticket C3). | C3 execution |
 | OQ-4 | physics-gate endpoint wrapper (D-06) and registry/SQLite colocation (D-08) acceptance. **2026-11-16: the D-08 half is CLOSED by the operator ruling (ADR-D-08 + A1 Accepted); the D-06 physics-gate half stays open for reviewer sign-off.** | M0 design freeze (D-06 half only) |

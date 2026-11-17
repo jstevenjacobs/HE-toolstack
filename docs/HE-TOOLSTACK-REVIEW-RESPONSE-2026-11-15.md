@@ -346,16 +346,16 @@ regression): **25/25 PASS, 0 FAILS**; Mermaid revalidated 9/9.
 markers stay; T-20/T-21/T-22/T-23 remain unexecuted; acceptance of A1 is a design-contract
 acceptance only — T-23 must still pass at Stage B before the contract is runtime-evidenced.
 
-**Open items remaining after round 6:** OQ-1 (ADR-D-02 files-first + tripwires posture) is the
+**Open items remaining after round 6 (superseded by the 2026-11-17 ruling — OQ-1 was RULED CLOSED that day, ADR-D-02 accepted as written; retained as round-6-era text):** OQ-1 (ADR-D-02 files-first + tripwires posture) was then the
 only open **M0-freeze-blocking** operator decision (target: M0 design freeze). OQ-2 (GB10
 exclusion — D-11 Proposed) targets Stage A; OQ-3 (RTX 5060 Ti co-scheduling re-measure) gates
-GPU-class enablement; OQ-4 is not an M0 blocker. ADR records remaining Proposed: D-02, D-06,
+GPU-class enablement; OQ-4 is not an M0 blocker. ADR records remaining Proposed at that time: D-02 (since Accepted 2026-11-17), D-06,
 D-07, D-11, D-17, D-18 (all carry recommendations; their sign-off tracks the OQs above).
 
 ## Disposition (r6)
 Five operator decisions recorded verbatim into the registers, documentation-only — nothing
 implemented, deployed, merged, or closed. **STOP per §10 remains in force for
-implementation/deployment; the next operator action is OQ-1.**
+implementation/deployment; the next operator action is OQ-1. **[2026-11-17: that action was taken — OQ-1 RULED, ADR-D-02 accepted as written; see ADR §4 and Appendix F.]**
 
 ---
 
@@ -396,7 +396,7 @@ Reviewer item-by-item:
 
 **Reviewer-cited "REQ NFR-16":** in the REQ registry NFR-16 is digest-on-artifacts (untouched —
 not network-related). The connectivity/trust items the review targets are **NFR-07, T-15, T-17**
-and the traceability rows citing them; all corrected under r7. Flagged for mapping confirmation.
+and the traceability rows citing them; all corrected under r7. Flagged for mapping confirmation. **CLOSED 2026-11-17: operator confirmed the mapping ("NFR-16 mapping confirmed") — the brief's item maps to NFR-07/T-15/T-17, our NFR-16 stays digest-on-artifacts and untouched.**
 
 Files changed this round: TD v1.6→v1.7 (§5.4b matrix, §6.1, §7.1, §10.2 risk row, §11.3, §11.6,
 D1/D4 captions); REQ v1.6→v1.7 (NFR-07 rewrite, T-15 six-leg restatement); ADR v1.6→v1.7
@@ -404,3 +404,5 @@ D1/D4 captions); REQ v1.6→v1.7 (NFR-07 rewrite, T-15 six-leg restatement); ADR
 (FINDING-01 row annotation, hygiene-line annotation, Appendix F). **STOP per §10 remains in
 force: no network configuration, firewall, Docker network, container, or deployment-script
 change was made or will be before approval; PR #11 stays open and unmerged.**
+
+**Operator acceptance (2026-11-17):** the operator ACCEPTED the r7 corrections as written ("r7 accepted") and CONFIRMED the NFR-16 mapping above — closing this appendix operator-side. NFR-07's satisfaction stays conditional on the T-15 six-leg matrix at M0 by the operator's own ruling; reviewer-independent re-review of v1.7 (if the reviewers issue one) remains their prerogative, and this acceptance is by the operator, not of the reviewers.

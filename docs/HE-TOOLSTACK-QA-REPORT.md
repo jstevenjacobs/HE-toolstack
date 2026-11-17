@@ -1,6 +1,6 @@
 # HE-toolstack Phase 2 — QA Verification Report
 
-**Document:** `docs/HE-TOOLSTACK-QA-REPORT.md` · v1.7 (rev 2026-11-16 r7: Q26 network-coherence gate added; totals 26/26. v1.6 (rev 2026-11-16 r6: +Q25 decision-integrity gate — operator rulings recorded across ADR/TD registers; prior v1.5 (rev 2026-11-16 r5: +Q24 backup-coherence gate; r5 rewrote backup mechanics and invalidated three r2 claims (see §3-r5); prior v1.3 (rev 2026-11-15b: review-response 2
+**Document:** `docs/HE-TOOLSTACK-QA-REPORT.md` · v1.8 (rev 2026-11-17 r8: Q25 extended — OQ-1 RULED 2026-11-17 asserted; D-02 Accepted count 11. v1.7 (rev 2026-11-16 r7: Q26 network-coherence gate added; totals 26/26. v1.6 (rev 2026-11-16 r6: +Q25 decision-integrity gate — operator rulings recorded across ADR/TD registers; prior v1.5 (rev 2026-11-16 r5: +Q24 backup-coherence gate; r5 rewrote backup mechanics and invalidated three r2 claims (see §3-r5); prior v1.3 (rev 2026-11-15b: review-response 2
 re-gate — 8 targeted corrections; +Q18…Q22) · r3 2026-11-16: +Q23 claim/ownership coherence; Q5/Q18/Q20/Q22 evidence refreshed (flock + submissions inbox) · 2026-11-14 (P2.5)
 **Method:** machine-checked where possible (scripts re-run against the repo at HEAD, not
 memory); manual where a human judgment is unavoidable (then stated as such). Baseline:
