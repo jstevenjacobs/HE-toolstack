@@ -13,6 +13,7 @@ IDs referenced here are defined in `HE-TOOLSTACK-REQUIREMENTS.md`.
 
 Decision provenance classes, stated up front because reviewers must be able to audit them:
 - **User-rulled**: accepted by Steven (chat ruling, 2026-11-14, recorded verbatim where quoted).
+> **Register numbering note (r12 audit):** this register contains **17 records** — D-01…D-12 and D-14…D-18. **No D-13 record was ever filed**: the ID appears in zero revisions of this file (verified against git history at r12); treat any "D-01…D-18 = 18 records" statement as an overcount, not a missing decision.
 - **Inherited**: accepted in attempt-1 (PD-toolstack) documentation and carried forward because
   the evidence behind it still holds.
 - **Proposed**: recommended by this design, **not yet accepted** — each needs explicit sign-off.

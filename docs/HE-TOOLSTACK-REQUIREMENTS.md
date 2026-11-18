@@ -1,6 +1,6 @@
 # HE-toolstack Requirements Baseline
 
-**Document:** `HE-TOOLSTACK-REQUIREMENTS.md` · v1.9 (round-10 health/contract canonicalization: NFR-23 canonical three-endpoint contract + `/health` retired + NFR-23 verification remapped T-10→T-08 + T-08 health fixtures + FR-04 replay body+status; revs below) (round-9 lifecycle ownership: NFR-01 six-step `make down` sequence + class-X exclusion assertion; NFR-10 sidecar spawn path + sidecar-owned janitor; T-13 assertions extended; project-name `he-toolstack` consistent — the `he-project` shorthand corrected; revs below) (rev 2026-11-16 **r7 — network-isolation correction**: NFR-07 bind-vs-publish two-layer rewrite + T-15 six-leg matrix restatement, gateway-client design retracted; round-5 backup/MinIO/OneDrive/restore corrections below; round-3 flock/inbox/T-23 revision:— FR-26 claim arbiter = flock(2) held lock (TD §8.8 r3; r2 O_EXCL/rename retracted); T-20/T-21 restated for flock; T-23 added (SQLite claim/submission crash matrix); NFR-09 digest-chain wording unchanged. Earlier rev 2026-11-15b: review-response 2 — FR-26 claim arbiter upgraded to O_EXCL lockfile (TD §8.8 r2); NFR-01 `make down` single-stop-path; NFR-07/T-15 alias facts corrected [V re-probe 15b]; T-20 claim-mutex + T-21 stale-claim + T-22 MinIO-version tests added; T-12 disambiguated; prior v1.3: NFR-07 gateway URL, T-17/18/19; prior v1.2: FINDING-01…07 revisions; +NFR-22 v1.1 D-14) · 2026-11-14
+**Document:** `HE-TOOLSTACK-REQUIREMENTS.md` · v1.10 (r12 traceability: **T-24** ticket-file mutual-exclusion audit added (FINDING-04/#5 — complements T-12 discipline audit, distinct from T-05 queue persistence and T-20 claim race); FR-23…26 matrix row extended; prior v1.9: round-10 health/contract canonicalization: NFR-23 canonical three-endpoint contract + `/health` retired + NFR-23 verification remapped T-10→T-08 + T-08 health fixtures + FR-04 replay body+status; revs below) (round-9 lifecycle ownership: NFR-01 six-step `make down` sequence + class-X exclusion assertion; NFR-10 sidecar spawn path + sidecar-owned janitor; T-13 assertions extended; project-name `he-toolstack` consistent — the `he-project` shorthand corrected; revs below) (rev 2026-11-16 **r7 — network-isolation correction**: NFR-07 bind-vs-publish two-layer rewrite + T-15 six-leg matrix restatement, gateway-client design retracted; round-5 backup/MinIO/OneDrive/restore corrections below; round-3 flock/inbox/T-23 revision:— FR-26 claim arbiter = flock(2) held lock (TD §8.8 r3; r2 O_EXCL/rename retracted); T-20/T-21 restated for flock; T-23 added (SQLite claim/submission crash matrix); NFR-09 digest-chain wording unchanged. Earlier rev 2026-11-15b: review-response 2 — FR-26 claim arbiter upgraded to O_EXCL lockfile (TD §8.8 r2); NFR-01 `make down` single-stop-path; NFR-07/T-15 alias facts corrected [V re-probe 15b]; T-20 claim-mutex + T-21 stale-claim + T-22 MinIO-version tests added; T-12 disambiguated; prior v1.3: NFR-07 gateway URL, T-17/18/19; prior v1.2: FINDING-01…07 revisions; +NFR-22 v1.1 D-14) · 2026-11-14
 **Status:** Baseline for review (Phase 2 deliverable C of DesignStandards §8)
 **Upstream sources:** Phase 1 report (`docs/PHASE1-ARCHITECTURE-DISCOVERY.md`, commit `141249d`)
 §2–§5; PD-toolstack `STACK-DESIGN-v3.md` (v3.8.1) and `STACK-AS-BUILT.md` (D-ledger D1–D27);
@@ -276,6 +276,7 @@ existing solver images.
 | T-21 | **Stale-claim supersede + expiry** (TD §8.8 **r3**): kill a claimant mid-session → after heartbeat staleness (`HE_CLAIM_STALE_MIN`, default 30 min [P]) **and** kernel-released lock, a second session acquires, re-verifies staleness under the lock, supersedes (ledger notes `superseded:`), and claims; **two concurrent superseders ⇒ exactly one proceeds** (flock serializes; loser 409); hung-but-alive holder is NOT supersedeable by design (test asserts 409 until the pid is killed); no ticket stuck unclaimable forever | concurrency test | FR-23…26, NFR-11 |
 | T-22 | MinIO **version-history export** sufficiency (r5 rewrite — the r2 premise "`mc mirror` + server-side versioning ⇒ version-aware restore" was verified **false** and retracted): N overwrites of a gate-passed object in a versioned bucket → run the §6.9.3 export (`rclone --s3-versions` payload set + `mc ls --versions --json` manifest) into candidate → assert payload count == N, manifest↔payload 1:1, current-version digest match, re-upload-at-restore-site semantics documented. **Fail ⇒ OQ-8** (latest-only + explicit NFR-17 relaxation decision — no silent weakening). | backup-integrity test | NFR-22, NFR-17, FR-29 |
 | T-23 | **SQLite queue/submission concurrency + crash matrix** (TD §7.5 r3 submissions inbox, §8.4b): (a) N≥4 concurrent `POST /v1/jobs` with **distinct** keys → N queue rows exactly (no loss/dup); (b) same `idempotency_key` raced 4× → **exactly one** queue row, dup requests resolve to the existing job id (dedup at consume); (c) engine `kill -9` between submission-insert and consume → after restart the submission is consumed once (idempotent replay), no half-consumed row; (d) `BEGIN IMMEDIATE` contention: concurrent consumes never interleave (affected-rows checks hold); busy/`503` behavior bounded-retry-then-honest | concurrency/failure-injection test | FR-16/37/39, NFR-02 |
+| T-24 | **Ticket-file mutual-exclusion audit (r12, FINDING-04/GitHub #5):** static + process audit that every writer of `workflows/tickets/*.md` enters via the TD §8.8 flock path — grep-class check for direct ticket writes bypassing `he ticket claim`, plus one live two-process claim demo under T-20's harness; complements (does not replace) T-12's ticket/cleanup discipline audit | process + live demo | FR-26, NFR-12 |
 
 ## 5. Requirements traceability matrix (v1.4: +T-20; T-12 scope disambiguated) (requirement → components → tests)
 
@@ -290,7 +291,7 @@ MO=minio, REG=registry(SQLite-in-WE), HEA=he-client, HD=heat-data(host dir), IM=
 | FR-10…15 | IM(tasmet/gmsh/openfoam/calculix/property/agentcad), WE, TS | T-01, T-09, T-04 |
 | FR-16…19 | WE(gpu-admission), OPS | T-05, T-06, T-23 |
 | FR-20…22 | PG, HD, IM, WE | T-01, T-03, T-04 |
-| FR-23…26 | WE, HD(workflows/), OPS | T-01, T-02, T-07, T-12, T-20, T-21 |
+| FR-23…26 | WE, HD(workflows/), OPS | T-01, T-02, T-07, T-12, T-20, T-21, T-24 |
 | FR-27…29 | HD, MO, WE | T-01, T-07, T-11, T-12 |
 | FR-30…32 | TS, REG, MO | T-08, T-10 |
 | FR-33…34 | REG, TS | T-10 |
@@ -314,8 +315,10 @@ MO=minio, REG=registry(SQLite-in-WE), HEA=he-client, HD=heat-data(host dir), IM=
 
 No requirement is unmapped; no component appears without at least one requirement
 (vocabulary §1 services: `agentcad`→FR-15; every T-id is referenced above).
-Counts v1.2: 23 FR + 43 NFR = 66 IDs (FR-41/42 = M3+ boundary rows, excluded from the
-initial-release matrix per design standards §15).
+ID totals: 42 FR + 24 NFR = 66 rows; FR-41/42 are M3+ boundary rows excluded from the
+initial-release matrix per design standards §15 (40 in-matrix FR). [r12-synced — an earlier
+revision carried a stale '23 FR + 43 NFR' count; gate Q16 now re-derives counts from the
+canonical tables.]
 
 ## 6. Open requirements (numbers not established — DesignStandards §15 rule)
 

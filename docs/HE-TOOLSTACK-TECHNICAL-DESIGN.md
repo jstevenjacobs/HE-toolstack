@@ -1,6 +1,6 @@
 # HE-toolstack Technical Design Document
 
-**Document:** `HE-TOOLSTACK-TECHNICAL-DESIGN.md` · v1.11 (rev 2026-11-17 **r11 — D-16 status confirmed ACCEPTED by operator (v1.1 filing-time label annotated)**; r10 — health/job/sidecar API contracts + v1.9 (rev 2026-11-17 **r9 — lifecycle ownership + diagram semantics**: class-C canonical enumeration (5 core incl. spawn-sidecar); make-down 6-step choreography = HOST RECIPE not engine; janitor 3-duties/3-owners; class-X exclusion in zero-assertion; D1/D3/D4/D9 redrawn; superseded socket-alternative drawings removed. v1.8 (rev 2026-11-17 r8: OQ-1 CLOSED — ADR-D-02 Accepted as written per operator ruling 2026-11-17; OQ/status mirrors updated. v1.7 r7 — network-isolation correction: bind-vs-publish separation made normative (§6.1/§11.3/§11.6), gateway client-URL probe retracted, six-leg T-15 isolation matrix referenced (§7.1/§10.1), Diagram 3 host-listener node fixed, D-15-accepted wording aligned; NOTE: the r6 ruling-record commit left this header line stale at v1.5 — caught in r7 recon; register flips themselves were verified at r6. Prior r5 rev: **round-5 backup corrections** — §6.9 rewritten (quiesce-and-wait §6.9.1; candidate→verify→DONE→NTFS-publish §6.9.2; MinIO version export §6.9.3 replacing the retracted mc-mirror-history claim; OneDrive L1–L5 proof ladder §6.9.4 with the explicit no-L4/L5-signal statement + OQ-8/OQ-9); §9.4 RPO reclassified local-completion; §9.6 restore-drill spec added; R-8 two-part staleness; D8 redrawn. Prior rev v1.4 (round-3 corrections — §8.8 ticket claim = flock(2) held-lock protocol; §7.5/§8.4b queue write-ownership resolved via submissions inbox. Earlier rev 2026-11-15b: review-response 2 — §6.2b normative spawn-sidecar API spec; §6.10 lifecycle classes + labels; §8.8 real claim mutual exclusion (O_EXCL lockfile arbiter); §6.7 WAL fairness corrected; §5.1 probe matrix re-run + Ollama bind finding [V]; D1/D2/D3/D4/D5/D8/D9 redrawn; prior v1.2: review response 1) · 2026-11-14
+**Document:** `HE-TOOLSTACK-TECHNICAL-DESIGN.md` · v1.13 (rev 2026-11-17 **r13 — final-review exceptions closed: §14 ADR count 18→17 (§14 ADR-count phantom-gap note; §8.2 status aligned to ACCEPTED D-08 A1 (ruling 2026-11-16); §18 v1.2 self-assessment scoped as filing-time; prior r12 — documentation synchronization: App. B/C counts+baselines corrected, test baseline T-01…T-24, Q16-coherence wording; prior r11 — D-16 status confirmed ACCEPTED by operator (v1.1 filing-time label annotated)**; r10 — health/job/sidecar API contracts + v1.9 (rev 2026-11-17 **r9 — lifecycle ownership + diagram semantics**: class-C canonical enumeration (5 core incl. spawn-sidecar); make-down 6-step choreography = HOST RECIPE not engine; janitor 3-duties/3-owners; class-X exclusion in zero-assertion; D1/D3/D4/D9 redrawn; superseded socket-alternative drawings removed. v1.8 (rev 2026-11-17 r8: OQ-1 CLOSED — ADR-D-02 Accepted as written per operator ruling 2026-11-17; OQ/status mirrors updated. v1.7 r7 — network-isolation correction: bind-vs-publish separation made normative (§6.1/§11.3/§11.6), gateway client-URL probe retracted, six-leg T-15 isolation matrix referenced (§7.1/§10.1), Diagram 3 host-listener node fixed, D-15-accepted wording aligned; NOTE: the r6 ruling-record commit left this header line stale at v1.5 — caught in r7 recon; register flips themselves were verified at r6. Prior r5 rev: **round-5 backup corrections** — §6.9 rewritten (quiesce-and-wait §6.9.1; candidate→verify→DONE→NTFS-publish §6.9.2; MinIO version export §6.9.3 replacing the retracted mc-mirror-history claim; OneDrive L1–L5 proof ladder §6.9.4 with the explicit no-L4/L5-signal statement + OQ-8/OQ-9); §9.4 RPO reclassified local-completion; §9.6 restore-drill spec added; R-8 two-part staleness; D8 redrawn. Prior rev v1.4 (round-3 corrections — §8.8 ticket claim = flock(2) held-lock protocol; §7.5/§8.4b queue write-ownership resolved via submissions inbox. Earlier rev 2026-11-15b: review-response 2 — §6.2b normative spawn-sidecar API spec; §6.10 lifecycle classes + labels; §8.8 real claim mutual exclusion (O_EXCL lockfile arbiter); §6.7 WAL fairness corrected; §5.1 probe matrix re-run + Ollama bind finding [V]; D1/D2/D3/D4/D5/D8/D9 redrawn; prior v1.2: review response 1) · 2026-11-14
 **Status:** Revised for re-review (DESIGN STATUS: CHANGES REQUESTED response package; Phase 2 deliverable A of DesignStandards §8)
 **Revision log (v1.9 → v1.10, r10 health/contract canonicalization):** §7.2 `/healthz` pure-liveness row + `/readyz` + `/deps` rows + six-scenario canonical response table; non-normative `state` field removed from the 201 example (schema = exactly `{job_id, queue_pos}`); §6.2b cross-cutting rows (caller identity/audit, authz+root-equivalent caveat, idempotency, timeouts, explicit no-`reap`); §7.5 stray `/v1/jobs` paths → `/jobs`; §8.2 canonical four-state evidence ladder; `/health` retired from the normative set (NFR-23 canonical contract).
 **Revision log (v1.2 → v1.3, r2 second-review items 1–8):** sidecar API normative spec §6.2b (operation-canonical paths; ADR/QA/TD synced); §8.8 claim = O_EXCL lockfile CAS (rename-CAS was the reviewer's item-3 objection, valid); WAL db-wide-write correction §6.7/§7.5; network probe matrix corrected + host-bind audit §5.1/§5.3/§6.4/D1/D4 (the hdi-refusal claim was over-generalized — fixed); backup: mc-mirror version-history + cross-fs transfer (mv-is-atomic claim only holds same-fs) §6.9; diagrams D1/D4 now show sidecar+gateway; lifecycle label triple normalized §6.10. (v1.1 → v1.2 adds review-§5.5 failure-class taxonomy (§12.5) + R-9 drill; §5.1 session/claim protocol §8.8; §5.2 durability matrix §5.4a; §5.4 security-boundary table §5.4b; §5.3 admission-soundness note §6.4; FM-11…13; T-17…19 refs; OQ-7; gateway-form client URL).**
@@ -146,9 +146,10 @@ automation (FR-41) — specified only as boundaries, not as promised functionali
 
 ## 3. Requirements
 
-The normative baseline is `HE-TOOLSTACK-REQUIREMENTS.md` v1.0: **40 functional (FR-01…42,
-two reserved for M3+), 24 non-functional (NFR-01…24), 19 verification tests (T-01…19), 5
-open requirements (OR-01…05)**. Every row carries ID, description, priority, rationale,
+The normative baseline is `HE-TOOLSTACK-REQUIREMENTS.md` **v1.10** (r12-synced; was a stale
+v1.0 reference): **42 FR rows (FR-01…42; FR-41/42 reserved [M3+], 40 in the initial-release
+matrix), 24 NFR (NFR-01…24), 24 verification tests (T-01…T-24), 5 open requirements
+(OR-01…05)**. Every row carries ID, description, priority, rationale,
 verification method, acceptance criteria; §5 of that file is the requirement→component→test
 traceability matrix (script-verified 100% mapped, no dangling IDs). DesignStandards §3's
 mandatory categories are each populated: tool invocation FR-06…15, config generation FR-04,
@@ -1050,7 +1051,7 @@ stateDiagram-v2
 > transition row carries its owner + trigger; acceptance = T-02/T-12 assert exactly these
 > tables (the single source of truth).
 
-### 8.2 Job/run state machines (machine half; SQLite; **r3 ownership:** engine owns ALL queue writes — toolserver enqueues via the `submissions` inbox (§7.5/§8.4b); ADR-D-08 A1 still Proposed/OQ-6 pending)
+### 8.2 Job/run state machines (machine half; SQLite; **r3 ownership:** engine owns ALL queue writes — toolserver enqueues via the `submissions` inbox (§7.5/§8.4b); ADR-D-08 A1 ACCEPTED — operator ruling 2026-11-16, OQ-6 CLOSED)
 Job: `queued → admitted → running → {succeeded | failed | cancelled}`, plus
 `degraded-evidence` (physics done, evidence step blocked — §6.5) and `stale-lease` (crash
 recovery re-queues, §8.6). Run: `created → active → gate_pending → {succeeded | failed} →
@@ -1484,6 +1485,8 @@ is external by this table, never an unlabeled orphan (NFR-10).
 ## 12. Reliability and Failure Analysis
 
 ### 12.1 Failure-mode table
+13 failure modes (FM-1…FM-13; FM-11…FM-13 added at round 2 — stated count kept in sync
+with the table by gate Q16).
 | ID | Failure | Likelihood (basis) | Impact | Detection | Mitigation (design) | Recovery | Tested |
 |----|---------|--------------------|--------|-----------|---------------------|----------|--------|
 | FM-1 | toolserver crash | med (any new code) | API unavailable; jobs unaffected | healthz fail | stateless edge; auto-restart policy | auto; idempotent client retries | T-07 kill matrix |
@@ -1583,7 +1586,7 @@ cache-invalidation surface exists.
 
 ## 14. Alternatives Considered
 
-Full evidence lives in `HE-TOOLSTACK-ADR.md` (18 records incl. rejected options D-02/D-03/D-05/
+Full evidence lives in `HE-TOOLSTACK-ADR.md` (17 records — numbering note: no D-13 record was ever made; the …D-18 range has that phantom gap — incl. rejected options D-02/D-03/D-05/
 D-08/D-09/D-10/D-12/X-1…X-8 with rejection reasons). The five architecture-level ones:
 **D-01 single compose vs split infra** — split re-created the C4 orphan exactly as observed;
 rejected. **D-02 files-first engine vs LangGraph/Temporal** — durable-exec platform cost on
@@ -1690,7 +1693,7 @@ verified before any M3 planning session, same discipline as C6.
 
 ## 18. Formal Review Readiness
 
-**Self-assessment vs §7 checklist (v1.2, re-run 2026-11-15 against review §7 + §5 areas).**
+**Self-assessment vs §7 checklist (v1.2 snapshot, re-run 2026-11-15 — filing-time record, superseded by rounds 2–13: the then-baselines **66 IDs**/**T-01…19**/OQ-2…7 no longer describe the current register (42 FR + 24 NFR, T-01…T-24, OQ-1…OQ-9 with OQ-1/OQ-5/OQ-6/OQ-7 closed); current traceability is re-checked per branch gate, not standing.**
 Complete: every §6 component answers the §7 question set or is explicitly [P]; traceability
 100% (**66 IDs** → components → **T-01…19**, matrix in REQUIREMENTS §5, script-re-verified
 this revision); interfaces at process boundaries (§7 incl. error envelope, 201 contract,
@@ -1740,7 +1743,7 @@ category driving admission. Tier: hot (heat-data) / cold (MinIO) / git (process)
 time-boxed running-claim in queue enabling crash recovery. Slice: M0's single end-to-end
 path. Tripwire: pre-agreed condition that converts "feels wrong" into a decision (§8.7).
 
-### Appendix B — Diagram index (mermaid sources inline; 8 required views)
+### Appendix B — Diagram index (mermaid sources inline; 8 required view *types*, 9 diagram instances D1–D9 — r12-synced: D7/D8 sequence views share the failure/e2e-sequence type)
 D1 system context (§5.1) · D2 logical components (§5.2) · D3 deployment boundaries (§5.3) ·
 D4 network communication (§5.3) · D5 ticket lifecycle (§8.1) · D6 M0 flow (§8.3) ·
 D7 state-maintenance timeline (§D7 below) · D8 backup/restore sequence (§D8 below) · D9 lifecycle/shutdown (§6.10, v1.1; **r9 redraw** to the six-step `make down` + D-16 spawn boundary). D1/D3/D4 carry r9 spawn-path redraws (D1 spawns via the accepted D-16 sidecar; D3 drops the legacy socket-exposure alternative and its open-question marker; D4 labels the accepted spawn edge).
@@ -1795,8 +1798,8 @@ sequenceDiagram
 
 ### Appendix C — Document QA self-check
 Every §6 component states its code lineage ([existing]/[P]/[asset]) — C1-class phantoms are
-structurally visible. Numbered cross-refs used: FR/NFR/T/OR (REQUIREMENTS v1.4), D/X/F/OQ
-(ADR v1.2), C/G (PHASE1), FM/R (this doc §11–12), D1…D14 (attempt-1 ledger evidence IDs).
+structurally visible. Numbered cross-refs used: FR/NFR/T/OR (REQUIREMENTS **v1.10**, r12-synced; was v1.4), D/X/F/OQ
+(ADR **v1.11**, r12-synced; was v1.2), C/G (PHASE1), FM/R (this doc §11–12), D1…D14 (attempt-1 ledger evidence IDs).
 No performance number appears without [V]/[E]/[proposal] tag. Diagrams 9/9 (D1–D9, r2-synced
 — was "8/8" stale). Sections 19/19
 (§11.5 numbering note). Unverified: every pinned-version "at first build"

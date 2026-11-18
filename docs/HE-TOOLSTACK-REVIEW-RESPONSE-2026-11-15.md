@@ -23,7 +23,7 @@ channel) are **requests for decision**, not assumed approvals.
 | FINDING-05 — backup atomicity/consistency (hot SQLite, OneDrive) | **ACCEPTED — fixed, then corrected r5** | TD new §6.9 host backup job (sqlite `.backup` API → staging → manifest → fsync → rename → DONE), RPO/RTO stated, OneDrive staleness alarm `backup_stale`; REQ NFR-22 amended, NFR-19 cross-ref; ADR-D-14 A1 amendment; T-18 drill | The review's durability demand is met with primitives named explicitly (`sqlite3 .backup`, fsync+atomic rename, write-ahead manifest ordering §5.4a). GitHub #6  GitHub #6  **(r5 correction: the A1 mechanism contained three false claims — cross-FS atomic rename, `mc mirror` version history, OneDrive placeholder-attribute sync proof — plus the §6.9-vs-NFR-22 active-job contradiction; all corrected in TD §6.9/§9.6 rewrite + ADR-D-14 A2. See Appendix D.)** |
 | FINDING-06 — MinIO liveness conflated with dependency | **ACCEPTED — fixed** | TD §7 health model split `/healthz` vs `/readyz` vs `/deps` (r10 canonical: `/healthz` liveness-only, `/readyz` never MinIO-gated, `/deps` = component map + backlog; `/health` retired; six-scenario response table §7.2), §6.3 depends_on corrected (service_healthy only where truthful); REQ NFR-23 | MinIO is now an **optional dependency** (promotion/replay path), never a startup gate for the core loop; degradation is observable, not fatal. GitHub #7 |
 | FINDING-07 — 202-vs-201 queue-accept semantics | **ACCEPTED — fixed** | FR-01 rewritten to **201 Created** + `{job_id, queue_pos}` with contract suite (T-08; r10: example body locked to exactly these two keys — stray `state` field withdrawn per D-18 A1; idempotent replay returns original body + 201); **ADR-D-18 (new record)**; he-client + status-model text aligned | Review §5 note honored: semantics fixed at the requirement level, not silently in a client shim. GitHub #8 |
-| FINDING-08 — ID-count / artifact mismatches across docs | **ACCEPTED — fixed + gated** | QA v1.2 gate Q16 (stale-token sweep) + Q4/Q5/Q15; DESIGN-REVIEW v1.1 counts; TD §14 "18 records" | Scripted gates now assert 66 requirement IDs, 19 tests, 9 diagrams, 18 ADR records — re-run, zero stale tokens. GitHub #9 |
+| FINDING-08 — ID-count / artifact mismatches across docs | **ACCEPTED — fixed + gated (r12 re-hardened)** | QA v1.2 gate Q16 was a stale-**token** sweep asserting the then-current set (66 req IDs, 19 tests, 9 diagrams; ADR tallies quoted 18 pre-D-17/D-18, actual 17). **r12 lesson: the token sweep passed while stale appendices existed** — FINDING-08 class defect re-opened in DESIGN-REVIEW §8 and closed by the r12 concept-level Q16 (counts re-derived from canonical tables + superseded-concept sweep + quoted-history exemption). GitHub #9 |
 
 ## B. Review §5 independent areas (beyond the 8 findings)
 
@@ -32,7 +32,7 @@ channel) are **requests for decision**, not assumed approvals.
 | §5.1 durability primitives unspecified | FIXED | TD §5.4a write-order/durability matrix (fsync/os.replace/rename where each state transition needs it) |
 | §5.2 security boundaries table absent | FIXED | TD §5.4b (trust zones, what crosses each boundary, enforcement point) |
 | §5.3 sidecar side-effects | FIXED | ADR-D-16 consequences + TD §6.2 (audit log, allow-list server-side, socket never mounted into engine) |
-| §5.4 concurrent sessions / claim races | FIXED | TD §8.8 + T-12 property test |
+| §5.4 concurrent sessions / claim races | FIXED | TD §8.8 + **T-20** concurrent-claim mutual-exclusion property test (r12 correction: this row mis-cited T-12, the process-discipline audit; T-24 added r12 for the writer-bypass audit) |
 | §5.5 failure-class taxonomy | FIXED | TD §12.5 seven classes RC-1…7 (detection → affected state → recovery → evidence), FM-11…13 added to FMEA, R-9 daemon-restart drill + T-19 |
 | §5.6 reconcile / orphan gapless ledger | FIXED | TD §8.6 reconcile invariant (container-without-row → reap; row-without-container → interrupted → requeue idempotent) + NFR-24 + T-19 |
 
@@ -57,7 +57,7 @@ evidence. No preserved item was altered.
 
 1. GPU-class numbers still rest on one pre-C6 measurement (FINDING-04-of-original-review
    is fixed *as a claim*, not as data — C6 re-measure stays the gate; admission disabled).
-2. T-01…T-19 are **specified, not executed** — zero runtime claims are made anywhere.
+2. T-01…T-24 are **specified, not executed** (r12-synced) — zero runtime claims are made anywhere.
 3. D-15/D-16 unresolved means §6.2/§6.4 text is "specified to recommendation level"
    until ruled; flagged in-paragraph, not hidden.
 4. QA harness lives in scratch (promotion to `scripts/qa/` is an M0 action, per QA §4).
@@ -151,8 +151,8 @@ Superseded `host.docker.internal`-as-trust-boundary edges removed.
 ## Correction 6 — Spawn-sidecar interface
 **Done.** One normative spec: TD §6.2b — `POST /v1/create_run` (`create_run`),
 `GET /v1/runs/{id}/status` (`status`), `POST /v1/runs/{id}/kill`, `GET /v1/runs/{id}/logs` —
-(r10: these paths + cross-cutting rows are the locked canonical table; earlier `/v1/spawn`
-wanding in this appendix is superseded by §6.2b verbatim.)
+(r10: these paths + cross-cutting rows are the locked canonical table; earlier
+`/v1/spawn` wanding in this appendix is superseded by §6.2b verbatim.)
 4 ops, JSON, no auth (network membership = the control). ADR-D-16 and QA Q14 now point at
 §6.2b as the single source; every other mention is prose referring to it. Stale alias
 sweep (`POST /spawn`, bare `run/status/kill/logs` verb-lists, `run`+`status` combined path)
@@ -169,7 +169,7 @@ re-acquires immediately; documented ceiling + escalation path (per-DB files) ret
 
 ## Correction 8 — Documentation traceability
 **Done.** QA report v1.3 + DESIGN-REVIEW v1.2 resynced to this exact tree: stale counts
-removed (22 T-ids T-01…T-22, 17 ADR records, 136 [V]/[E]/[P] tags, OQ-1…OQ-7 — OQ-1 row
+removed (then-current T-id set, r2 baseline T-01…T-22; tree now 24 T-ids T-01…T-24 — r12 sync; 17 ADR records, 136 [V]/[E]/[P] tags, OQ-1…OQ-7 — OQ-1 row
 restored in TD §17.1, and gate found+removed a dangling ref to a non-existent record
 — the phantom D-13 was a PD-ledger row number, not an ADR). **T-12 disambiguated:** T-12 =
 process-write-audit only; concurrent-claim-race is its own test **T-20**, digest-chain is
@@ -318,7 +318,7 @@ Documentation-only, same discipline. Scope-inspected first (TD §§5.4a/6.9/9.1/
 | D | NFR-22/T-11 "while jobs run" contradicted §6.9 refuse-mode and contradicts application-consistency (solver output changes mid-copy) | **ACCEPTED — one policy: quiesce-and-wait** | TD §6.9.1 behavior matrix (running-at-start → wait, bounded, no force-kill; submitted-during → 409 `backup_paused` via pause file, §6.2 + §8.7 rows added; starts-after-check → impossible, admission serialized on the pause gate; crash → lock released with the process, candidate never eligible; incomplete-run restore → §9.6 reconciliation, orphan quarantine). Proven live-state snapshot (LVM-thin etc.) does not exist on this WSLv2 layout — **not assumed**; `--allow-active` withdrawn (it never shipped — text claimed a flag the design had not described). Tradeoff stated: nightly window may push past cadence under long batch. NFR-22 + T-11 + T-18 + T-08 rewritten to test the policy |
 | E | Restore proof | **ACCEPTED — specified, and T-11 explicitly NOT claimed** | TD §9.6: restore drill from the canonical destination with 8-point acceptance (immutable-DB verify (WAL/SHM not restorable by design — the DB is immutable while a run is held); run-state/job-state reconciliation; artifact digest vs `manifest.json`; MinIO object + version-history check per the chosen mechanism; git repo/bundle recovery; DONE+manifest integrity; OneDrive read-back evidence per OQ-9 outcome; post-restart reconciliation at steady state). "T-11 passed" requires executed evidence; the QA report states none has been executed and never will be by a doc change |
 
-Counts verified at commit time (measured, not asserted): TD top-level sections **19** (9.6 is a subsection of §9; §6.9 gained subsections 6.9.1–6.9.4); REQ test register **T-01…T-23** unchanged in size — T-11/T-18/T-08 **rewritten** and **T-22 rewritten** (it existed since r3; r5 replaced its false `mc mirror` premise, it was not newly added); QA gates 23→**24** (Q24 backup-coherence added this round). Residual risk is deliberately kept in the docs: OQ-8/OQ-9/D-15/D-16 all still open, RPO is explicitly local-only for now — the review's whole point was that unproven claims were being designed around as proven.
+Counts verified at commit time (measured, not asserted): TD top-level sections **19** (9.6 is a subsection of §9; §6.9 gained subsections 6.9.1–6.9.4); REQ test register **T-01…T-23** (filing-time count; current register T-01…T-24) unchanged in size — T-11/T-18/T-08 **rewritten** and **T-22 rewritten** (it existed since r3; r5 replaced its false `mc mirror` premise, it was not newly added); QA gates 23→**24** (Q24 backup-coherence added this round). Residual risk is deliberately kept in the docs: OQ-8/OQ-9/D-15/D-16 all still open, RPO is explicitly local-only for now — the review's whole point was that unproven claims were being designed around as proven.
 
 ## Disposition (r5)
 All five items accepted; corrections applied documentation-only — no scripts written, OneDrive not touched,
@@ -437,7 +437,7 @@ never an acceptance criterion (NFR-01).
 timer; startup sweep = sidecar on boot; final sweep = `make down` recipe host-side.
 Engine-boot reconciliation (§8.6) is a separate engine duty.
 
-**Terminology drift corrected:** FINDING-02 disposition row said "classes A/B/X"; canonical
+**Terminology drift corrected (superseded terminology quoted as history):** FINDING-02 disposition row said "classes A/B/X"; canonical
 is **C/J/X** (TD §6.10, ADR-D-01 A1, NFR-10). No other A/B/X usage existed.
 
 **FINDING-02 resolution claim:** the brief is right that the claim was not honest while
@@ -540,3 +540,50 @@ open and flagged the conflict (Appendix H; PR comment `issuecomment-6959504627`)
 
 **STOP per §10 re-declared after this round: no implementation, deployment, merge, or
 issue-closure action taken.**
+
+> **Status banner (r13):** body and Appendices A–I are the record AS FILED 2026-11-15; several then-open items were ruled AFTER filing (D-15 ACCEPTED Option D 2026-11-16; D-16 ACCEPTED Option B r6, operator reaffirmation 2026-11-17; D-08 A1 ACCEPTED 2026-11-16 and OQ-5/OQ-6/OQ-7 CLOSED). Sentences below saying D-15/D-16/A1 are 'open', 'pending' or 'operator-pending' are filing-time statements, now superseded. Read current status from ADR v1.11 / this file's Appendices E–J.
+
+## Appendix J — Round 12 (2026-11-17): documentation synchronization, Q16 hardening, issue-by-finding reconciliation, final independent review
+
+Docs-only per brief (no implementation, no deploy, no merge, no issue closes).
+
+### J.1 — Stale-documentation corrections (brief §A)
+
+All statements re-verified against actual content, not just re-counted:
+TD App. B "8 required views" → **8 required view *types*, 9 diagram instances D1–D9** (D7/D8 share the sequence-view type); TD App. C "Diagrams 8/8" → 9/9 and baseline refs Requirements v1.0 / ADR v1.0 → **declared historical baseline, annotated r12-synced (was v1.4/v1.10 lineage; current REQ v1.10 / ADR v1.11 / TD v1.12)**; DESIGN-REVIEW "12 decision records" → 17, "Diagrams 1–8" → D1–D9, "FM-1 through FM-10" → FM-1…FM-13, "R-1..R-7" and "T-01..T-19" → current ranges; RR lifecycle classes **A/B/X → C/J/X** (canonical core-5 = class C, dynamic one-shots = class J, GB10 ARM64 = class X); TD §12.1 FM count synced to 13; DR "18 ADR records" overcount → **17 records, D-01…D-12 + D-14…D-18** — a *phantom D-13* was found and resolved: git history proves no D-13 record was ever filed (register numbering note added at ADR top; Q6 now treats audit notes as gap explanations). REQ internal line "23 FR + 43 NFR" (v1.2-era) → current 42 FR + 24 NFR with the FR-41/42 M3+ boundary note preserved.
+
+### J.2 — Q16 hardened (brief §B)
+
+Q16 is no longer a numeric-token list. It now: (a) **re-derives** FR/NFR/T/FM/ADR/diagram counts from the canonical tables (regex over the tables themselves) and fails on any contradicting stated copy, with a narrow quoted-history exemption (`boundary rows` / `gate Q16` audit-note lines); (b) checks header versions against the App.-C declared baseline; (c) sweeps **superseded concepts** — old endpoints (`/v1/spawn`, `ticket start`, bare `/health`), old networks (`he-core`/`he-apps`), old compose service name (`service:hermes-desktop`), old lifecycle labels (A/B/X), old diagram/FMEA/test counts, old backup wording, old API schemas (`v1.0)` baselines) — exempting lines that are explicitly historical (FINDING-register rows; lines containing supersede/replaced/retired/was/pre-/earlier/baseline); (d) asserts the canonical backup root and the 201 `{job_id, queue_pos}` schema. **First run after hardening caught 6 stale concepts the old sweep missed** (stale REQ count line, DR overcounts, phantom D-13, baseline lines) — evidence the check detects concepts, not tokens. §2b manual diagram-to-prose checklist (M1–M10, acceptance questions incl. spawn-edge-only-through-sidecar, health-endpoint labels, class-C/J/X legend) added; Q3/mermaid explicitly scoped to syntax.
+
+### J.3 — Test-ID integrity (brief §C)
+
+**T-24 assigned**: ticket-file mutual-exclusion audit (independent-process race on `he ticket` file ops under flock, per TD §8.8 r3 protocol) — added to REQ §4 + traceability (FR-23…26 row), TD §3 pointer, QA Q5. T-12 stays what it always was (ticket/cleanup **discipline audit**); RR no longer claims T-12 proves concurrency; T-05 remains queue persistence/claims, explicitly **not** ticket-file claims. 24 tests defined; **none executed** (design-only, no M0).
+
+### J.4 — QA honesty (brief §D)
+
+QA §5 added. Evidence classes now stated per gate: **automated-rerun-this-pass** (27 gates, harness `.hermes-tmp/gates_v13.py` — scratch, gitignored, deliberately NOT promoted to a repo CI project without authorization) vs **external-tool** (mermaid 12.3.0 parse, 9/9) vs **author manual review** (marked `[author self-review]`) vs **reviewer-side pending** (nothing marked complete that needs a human). Reproducibility limitation stated plainly: a reviewer **cannot** rerun the 27 gates independently unless they ask for the harness; the gate *definitions* are described in QA §1 rows precisely so findings are checkable by hand in the meantime.
+
+### J.5 — Issue-by-finding reconciliation (brief §E; all issues #2–#10 kept OPEN per brief)
+
+| Issue | Original finding (summary) | Exact correction on this branch | Acceptance criterion | Evidence | Remaining risk | Status |
+|---|---|---|---|---|---|---|
+| #2 FINDING-01 | Agent→toolserver endpoint `127.0.0.1:8100` unreachable from agent container | TD §5.4 + §5.4b six-leg probe matrix; client URL `http://toolserver:8100` (in-network DNS), TS_BIND in-container, **zero host publication** norm; ADR-D-15 Option D (`he-agent` net, Approved) | Agent container reaches toolserver without any host-exposed port | Q26 gate; TD §5.4b; probe **specified (T-15), not executed** | Six-leg matrix unprobed on real GB10 until M0 | fix documented; keep open until operator/reviewer accept r7 |
+| #3 FINDING-02 | Lifecycle ownership unreconciled (NFR-10 vs dynamic containers vs host backup timer) | TD §6.10 lifecycle owner table; canonical labels `he-stack=1`/`he-run`/`he-job-id`; six-step `make down` + host-side final sweep; class-C core-5 vs class-J one-shots vs class-X exclusion; ADR-D-01+A1 | One named owner per container class; shutdown deterministic | Q27 gate; NFR-01/NFR-10/NFR-24; T-13 defined | sweep races with in-flight kill ops are **spec-level**, untested | fix documented; reviewer disposition of r9 pending |
+| #4 FINDING-03 | Docker-socket privilege / OQ-5 | TD §6.2b spawn-sidecar 4-op HTTP API (`create_run`/`status`/`kill`/`logs`), no socket in engine, no reap op, **root-equivalent caveat stated**; D-16 RULED Option B (r6 ACCEPTED) | No engine-facing Docker socket; minimal sidecar surface | Q28; Q14; diagrams M1 checklist | sidecar isolation is root-equivalent (caveat preserved); T-17 untested | fix documented; D-16 settled by operator |
+| #5 FINDING-04 | SQLite writer ownership conflict | TD §8.4b submissions-inbox model (toolserver never UPDATEs queue tables); §8.8 flock r3 claim protocol; T-05 (queue persistence) / T-20 (claim race) / T-21 (supersede) / **T-24 (ticket-file mutex, r12)** / T-23 (submission crash matrix) | Single-writer rule per table; claims kernel-enforced | Q18/Q23 gates; T-24 traceable | all concurrency tests unexecuted | fix documented; OQ-6 D-06 half closed r6, T-22 half contingent |
+| #6 FINDING-05 | Backup consistency / D-14 root | TD §6.9.1 + §9.6 quiesce-and-wait + atomic-cross-FS honesty corrected (r5); ADR-D-14 A2; canonical root `/mnt/c/Users/steven/OneDrive/Backup/HE-toolstack/`; L4/L5 honesty; OQ-8/OQ-9 | App-consistent snapshot incl. SQLite WAL + solver artifacts | Q13/Q24 gates | OQ-8 contingent on T-22 (unexecuted); OQ-9 manual-ritual accepted r6 | fix documented; OQ-8 open risk noted |
+| #7 FINDING-06 | MinIO dependency semantics conflict | TD §8.2 four-state evidence ladder + six-scenario health table; promotion-delayed ⇒ `degraded-evidence` **never** `failed`; D-17 optional-dependency record | One coherent dependency model incl. startup + health + evidence | Q28; scenarios 2/6 | ladder behavior at MinIO flapping (up-down-up) untested | fix documented; reviewer accept pending |
+| #8 FINDING-07 | API/state-machine contradiction (202 vs 201, state sets) | One canonical contract: `POST /jobs` → **201** `{job_id, queue_pos}` (no state in 201), FR-01 aligned, full state model TD §8.2, health `/healthz`+`/readyz`+`/deps` (`/health` retired); D-18 record | FR ↔ TD agreement on schema + states | Q28; Idempotent-Replay wording REQ+TD | 409/422 error-shape detail deferred to implementation | fix documented |
+| #9 FINDING-08 | Doc-sync / traceability drift | J.1 + J.2 above; **honest footnote: the r2-era claim "gates now assert everything" was itself stale** (token sweep passed while appendices rotted) — lesson folded into Q16 design + FINDING-08-class gate Q16 concept sweep | Counts/versions/refs true against content | Q16 concept-level, 0 hits; QA v2.2 §1/§5 | doc drift recurs with every round → concept-level Q16 is the standing defense | fix documented + structurally gated; keep open until r12 reviewed |
+| #10 §5.1–5.5 | Independent review asks (recovery, idempotency, claims, isolation, ops) | Crash recovery + reconciliation TD §9; idempotent replay §7.2; concurrency §8.8; isolation Q26; ops runbook §9.6 + backup §6.9.1; all mapped to T-01…T-24 | Each 5.x question answered by a specified, traceable mechanism | traceability matrix + Q4/Q5 | **all answers are design-level; zero runtime evidence** — this remains the dominant open risk | fix documented; this is the review's standing caveat |
+
+No finding was marked resolved merely because this document says so: each row above names machine-checkable evidence (gate IDs) and names what is still *unproven* (runtime).
+
+### J.6 — Outstanding decisions & risks (brief §F context)
+
+Operator-side: none blocking M0-freeze. Reviewer-side pending: r9–r11 dispositions, OQ-4 D-06 half, D-17/D-18 acceptance, DESIGN-REVIEW §9 sign-offs. Standing risks: (1) 24 tests specified, **0 executed** — every correctness claim is design-only; (2) sidecar root-equivalence caveat (D-16 Option B is accepted *with* this caveat); (3) GB10 ARM64 node excluded (class X) — resource-sharing policy unchanged; (4) probe matrix (T-15) unprobed on real hardware.
+
+### J.7 — Final recommendation
+
+**APPROVE THE DOCUMENTATION PACKAGE FOR M0-FREEZE — design-only, with exceptions.** Exceptions: (a) runtime correctness is unverified by construction (M0 exists to execute T-01…T-24); (b) reviewer-side sign-offs listed in J.6 remain outstanding; (c) D-08 A1 and the OQ-4/OQ-8 tails stay open exactly as decided. The package is now internally coherent under a *concept-level* gate (not a token sweep), honest about evidence classes and reproducibility limits, and free of phantom IDs. No code, compose, or deployment artifact was produced or executed in r12; the PR stays documentation-only and issues #2–#10 stay open pending human approval and merge.
