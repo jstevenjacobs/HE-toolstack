@@ -1,6 +1,8 @@
 # HE-toolstack Architecture Decision Register (ADR)
 
-**Document:** `HE-TOOLSTACK-ADR.md` · v1.1 (rev 2026-11-15: +ADR-D-14 backup root, user ruling) · 2026-11-14
+**Document:** `HE-TOOLSTACK-ADR.md` · v1.11 (rev 2026-11-17 **r11 — D-16 status conflict RULED by operator: round-6 ACCEPTED (Option B) stands, confirmed 2026-11-17**; r10 — API-contract canonicalization: D-16 A1/A2 (spawn-axis clarification; §6.2b path mapping locked; record open pending operator), D-17 canonical health trio (`/health` retired), D-18 A1 (`POST /jobs` body exactly `{job_id, queue_pos}`); previously r9 — lifecycle ownership: D-01 A1 corrected — class-C canonical core 5
+  per TD §6.10 r9, spawn path via the D-16 sidecar, `make down` restated as the six-step host recipe;
+canonical label `he-stack=1`. Earlier v1.8 (rev 2026-11-17 r8: **OQ-1 RULED — ADR-D-02 Accepted as written per operator ruling; D-02 status line, X-2 and §4 row updated; r7 corrections + NFR-16 mapping accepted by operator.** v1.7 r7: r2-era filing-time lines annotated where superseded by the r6 rulings; records themselves unchanged. v1.6 r6: **operator rulings recorded** — D-15 approved as Option D (he-agent net), D-16 approved as Option B (spawn-sidecar), ADR-D-08 A1 accepted, OQ-9 ruled Option A (manual ritual), OQ-8 confirmed contingent-on-T-22; prior r5: ADR-D-14 **A2** — mirror-history + ADR-D-14 **A2** — mirror-history + atomic-cross-FS-rename + OneDrive-sync-status claims corrected, quiesce-and-wait policy ruled, OQ-8/OQ-9 opened; prior r3: ADR-D-08 A1 reworded to the submissions-inbox model (r2 per-table split withdrawn as self-contradictory); OQ-6 synced. Prior rev 2026-11-15b: review-response 2 — D-15 probe-matrix correction [V re-probe 15b], D-16 points at TD §6.2b normative API; prior v1.2: response 1 — D-01/D-08/D-14 A1, +D-15…D-18; prior v1.1: +D-14 backup root) · 2026-11-14
 **Status:** Living register (Phase 2 deliverable B of DesignStandards §8). Updates are ledger-
 backed commits; superseded ADRs stay visible with status `Superseded by …`.
 **Companion:** `HE-TOOLSTACK-TECHNICAL-DESIGN.md` §17 summarizes this register; requirement
@@ -11,6 +13,7 @@ IDs referenced here are defined in `HE-TOOLSTACK-REQUIREMENTS.md`.
 
 Decision provenance classes, stated up front because reviewers must be able to audit them:
 - **User-rulled**: accepted by Steven (chat ruling, 2026-11-14, recorded verbatim where quoted).
+> **Register numbering note (r12 audit):** this register contains **17 records** — D-01…D-12 and D-14…D-18. **No D-13 record was ever filed**: the ID appears in zero revisions of this file (verified against git history at r12); treat any "D-01…D-18 = 18 records" statement as an overcount, not a missing decision.
 - **Inherited**: accepted in attempt-1 (PD-toolstack) documentation and carried forward because
   the evidence behind it still holds.
 - **Proposed**: recommended by this design, **not yet accepted** — each needs explicit sign-off.
@@ -36,13 +39,28 @@ Decision provenance classes, stated up front because reviewers must be able to a
   tech design); teardown must copy bucket contents before host-orphan removal (ticket C3).
 - **Risks:** compose-project growth temptation (solved by profiles, NFR-10); single project =
   one bad healthcheck can block `up` (mitigated: profiles + `depends_on` conditions).
+- **Amendment A1 (2026-11-15, FINDING-02, GitHub #3; supersedes the blanket "owns every
+  service" reading, decision history preserved; r9 — service enumeration, spawn path, and
+  `make down` choreography updated to the accepted D-15/D-16 architecture):** compose owns the **long-running services**
+  (class C — canonical core 5: toolserver, workflow-engine, spawn-sidecar (D-16), minio,
+  he-scratch-keeper; `gpu-probe` only under the `gpu` profile): start/stop/health/restart. **One-shot job containers are
+  engine-owned** — created through the Docker API *via the D-16 spawn-sidecar* (the engine
+  holds no socket) with labels `he-stack=1` + `he-run=<id>` + `he-job-id=<id>`, lifecycle
+  class J (§6.10): create→run→exit-record→janitor sweep (janitor duties/owners in §6.10 r9);
+  graceful shutdown SIGTERMs running jobs (through the sidecar kill op) and records
+  `interrupted` *before* the engine exits. The **host backup timer is a declared
+  infrastructure exception** (class X, §6.9), never a stack dependency. `docker compose down`
+  removes only class-C containers — that is its real scope, never complete stack shutdown;
+  `make down` = the six-step sequence (§6.10 r9: stop claims → kill jobs via sidecar kill op →
+  record `interrupted` write-ahead → compose down (class C) → host-side reap → verify), and
+  the zero-container acceptance (T-13) is asserted over classes C∪J union, class X excluded. The architecture no longer claims compose owns what it does not manage.
 - **Revisit when:** stack outgrows one host (multi-node compose/swarm — not planned before
   M3+) or object store requirements exceed MinIO (none identified).
 - **References:** SA §infra + restore-drill rows; `pd-analysis/infra/minio-compose.yml` [E];
   P1 §4 C4; NFR-01/10, FR-29/T-11/T-13.
 
 ### ADR-D-02 — Workflow control = externalized files + ~200-line runner; no orchestration framework in the initial release
-- **Status:** **Proposed** (awaiting explicit sign-off — see §4 OQ-1)
+- **Status:** **Accepted — operator ruling 2026-11-17 (OQ-1 closed: "OQ-1 accepted as written"; the named tripwires are retained as part of the acceptance and re-fire re-evaluation toward a framework).**
 - **Context:** v3 leaned toward LangGraph; research during the pivot (session
   `20261114_133606_df5042`) established: LangGraph's self-healing resume requires
   *durable-execution* infrastructure (Temporal-class platform) the stack does not have; the
@@ -184,13 +202,36 @@ Decision provenance classes, stated up front because reviewers must be able to a
 - **References:** SA restore drill [E]; FR-29, NFR-17, T-11.
 
 ### ADR-D-08 — One SQLite (run registry + queue + lease-state) co-located with the workflow engine
-- **Status:** Proposed (sign-off needed)
-- **Decision/rationale:** WAL-mode SQLite is the minimum durability primitive that already
+- **Status:** **ACCEPTED incl. Amendment A1 by operator ruling 2026-11-16 — OQ-6 closed; §8.4b/§7.5/§6.1 freeze as written (T-23 = acceptance test).**
+- **Decision/rationale (r3 status note, now resolved: the A1 model below was explicitly accepted
+  by the operator 2026-11-16):** WAL-mode SQLite is the minimum durability primitive that already
   exists in the runtime; three stores (queue + registry + lease) would triple the
   consistency problem D-05 just collapsed. Contention at single-operator write rates is
   negligible [P]. Alternatives: Postgres (extra service to operate, deferred — compose
   profile exists for it), separate queue (Redis — rejected: durability requires AOF
   gymnastics SQLite gives by default).
+- **Amendment A1 (r3 rewrite, 2026-11-16 — reviewer round-3 finding accepted; resolution of OQ-6;
+  ACCEPTED by operator ruling 2026-11-16):** the r2 model
+  ("one writer per table; toolserver sole writer of `queue` + `idempotency_keys`") was
+  **internally contradictory** — TD §7.5 simultaneously granted the engine an
+  `UPDATE queue SET state='claimed'…` operation, so two processes wrote `queue` while two
+  other sections asserted per-table single-writer. Withdrawn. **Model now (reviewer option
+  2, explicit inbox):** toolserver's *only* write anywhere in the engine DB is `INSERT INTO
+  submissions(id, kind, payload_json, idempotency_key UNIQUE, …)`; the engine consumes each
+  row in ONE `BEGIN IMMEDIATE` transaction — dedup `idempotency_key` against
+  `idempotency_keys` (authoritative dedup at consume), `INSERT INTO queue` (+immutable
+  job_spec), `DELETE` the consumed submission — commit; and is the **sole writer of every
+  other table including `queue`** (transitions: `BEGIN IMMEDIATE` + affected-rows==1
+  conditional updates). WAL admits **one committer db-wide**; ownership is an application
+  convention the DB does not enforce; `busy_timeout` (5 s) buys wait-time, **not fairness**
+  — bounded retries, then honest `503`. Crash windows: submission-not-yet-consumed ⇒
+  replay-safe via key; consumed ⇒ queue row exists in the same commit (half-consumed
+  impossible); duplicate execution prevented by single dispatcher + conditional
+  transitions. Normative table: TD §8.4b; API path: TD §7.5. Rejected B (engine-internal
+  enqueue API) unchanged: adds a hop + engine-liveness hostage on the submit path (against
+  the FINDING-06 degraded posture). Rejected C (r3): dual-writer ON `queue` itself with
+  operation-level ownership — deliberately NOT accepted: no benefit over the inbox at equal
+  WAL contention, and it keeps the contradiction surface.
 - **Revisit:** fleet or >1 writer → Postgres profile flips on. **Refs:** FR-30/33, NFR-02;
   P1 §5 D-08.
 
@@ -254,7 +295,7 @@ Decision provenance classes, stated up front because reviewers must be able to a
 | Alt | Rejected alternative | Rejected by | One-line reason |
 |-----|---------------------|-------------|-----------------|
 | X-1 | Rebuild gpu-broker as a service | D-03 (ruling honored) | justification was multi-host leases; single host doesn't need it |
-| X-2 | LangGraph/Temporal as workflow engine | D-02 (pending final OQ-1) | resume-from-context-loss is a checkpoint pattern; platform cost outweighs function now |
+| X-2 | LangGraph/Temporal as workflow engine | **D-02 (Accepted as written, OQ-1 closed 2026-11-17)** | resume-from-context-loss is a checkpoint pattern; platform cost outweighs function now |
 | X-3 | Consolidate images ≤4 | **D-10 user ruling** | narrow scope = adaptability; blast radius per digest |
 | X-4 | GPU-exclusive mode | D-04 | evicts embeddings = self-inflicted memory outage |
 | X-5 | MinIO as hot solver store | D-05 | network hop in hot path; wrong shape for step files |
@@ -288,7 +329,27 @@ Decision provenance classes, stated up front because reviewers must be able to a
   M1, and if sync proves unreliable the fix is a per-item exclusion or rclone-side copy, decided with
   evidence, not now. 28–39× /mnt/c I/O penalty (D9) does **not** apply: backups are cold sequential
   copies off the hot path (X-8 scope note updated).
-- **Traces to:** NFR-22 (new), NFR-17/19, FR-29; TD §6.9 (new component), §9.1/§9.4, §12.2, D8, R-4, R-8 (new runbook row), §11.4 `BACKUP_ROOT`.
+- **Amendment A1 (2026-11-15, FINDING-05, GitHub #6 — destination ruling UNCHANGED; procedure hardened):**
+  the destination stays exactly as ruled. What the review corrected is the **method**: a plain
+  nightly `rsync` of a live tree containing SQLite (WAL), MinIO objects, and active solver
+  artifacts can be internally inconsistent even when rsync exits 0, and a silent OneDrive outage
+  means the "backup" never left the machine. The backup is now a **6-step application-consistent
+  job** (§6.9): (1) preflight (free space ≥2× payload, destination writable, sync client running);
+  (2) `jobs` snapshot at `queued` (no force-kill of running jobs); (3) SQLite via the online-backup
+  API (WAL-safe; copy ends with a checkpoint) + `PRAGMA integrity_check` on the copy;
+  (4) `mc mirror` per bucket + sha256 manifest — `mc` is confirmed inside
+  `chainguard/minio@sha256:915a4a…` [V 2026-11-15 probe], no new image; artifacts are copied
+  content-addressed, so a concurrent writer cannot corrupt them; (5) **stage on ext4, verify,
+  complete atomically**: a directory is a *backup* only once its `_READY/<seq>.json` marker is
+  written last; (6) **OneDrive read-back verification** (enum + digest of at least one marker +
+  one sample object; `sync_status` recorded) + 7-day retention pruning. Interrupted backups
+  self-heal (rsync resumable; incomplete = no marker = never a restore source). Restore sequence
+  R-4/R-8 is fixed: **quiesce stack → restore registry + DB (integrity_check) → start services →
+  verify manifests → resume** — no split-brain reads of a half-restored tree. New RPO 24 h /
+  RTO ≤ 2 h + drill. A successful rsync command is explicitly **not** treated as proof of an
+  application-consistent backup.
+- **Amendment A2 (2026-11-16, review round 5 — root-path ruling UNCHANGED again; four A1 mechanics corrected):** A1 hardened the procedure but itself asserted three unverified cross-boundary properties and one policy that contradicted TD §6.9. Round-5 corrections, all in TD §6.9/§9.6 (rewritten): **(1) Publish path.** A1 step 5's stage-then-"complete atomically" rename cannot cross ext4 → `/mnt/c` (different filesystems, different superblocks — POSIX rename does not span them). Publication is now copy-to-`$ROOT/.candidate-<runid>/` (robocopy) → **verify every destination file digest against the manifest** → write `DONE.json` inside the candidate → rename **within the NTFS volume** to `<yyyymmdd>.<runid>/`. Interrupted transfers are detected (no DONE ⇒ never a restore source; `.candidate-*` aged past one cadence → `.quarantine/` after a ledger line) and resumed (robocopy skips digest-matching destination files). **(2) Active-job policy.** A1 step 2 ("snapshot at queued, no force-kill") left live solver output changing during copy — not application-consistent by definition. Single M0 policy: **quiesce-and-wait** (§6.9.1: pause file → submissions 409 `backup_paused` → wait active jobs to zero, bounded; else abort); a proven live-state snapshot mechanism (LVM-thin etc.) does not exist on this WSLv2 layout and is NOT assumed. NFR-22/T-11 ("while jobs run") rewritten to match. **(3) OneDrive proof.** A1 step 6's read-back + `sync_status` had no credential-free mechanism behind it — the `attrib` placeholder check is **negative-only** (set ⇒ not yet uploaded; cleared ⇒ still unproven) and robocopy exit 0 proves nothing about OneDrive. TD §6.9.4 now separates L1 exists-in-WSL-dir / L2 copied+verified locally (= what `DONE.json` proves, **nothing more**) / L3 file attributes / L4 OneDrive-processed / L5 remote read-back; **this host environment has no automated L4/L5 signal today — stated explicitly; RPO claims are local-completion RPO until OQ-9 resolves** (manual web read-back ritual [M0] or Graph app registration). **(4) MinIO version history.** A1 step 4's `mc mirror` cannot carry version history (vendor-documented: mirror replicates current object data; versions and bucket versioning config are not replicated). History ships via the **§6.9.3 export** (rclone `--s3-versions` payload-per-version + `mc ls --versions --json` manifest), restore-site semantics = re-upload as new versions; **falsifiable at runtime via T-22**, with OQ-8 recording the honest fallback (latest-only + explicit NFR-17 relaxation) as *required-if-triggered, not adopted*. The A1 line "attempt-1's proven nightly backup cron … restore drill passed" [E] stands as history for PD-toolstack's *plain-copy* design; it neither verified nor can retro-validate these mechanisms.
+- **Traces to:** NFR-22 (revised v1.2), NFR-17/19, FR-29; TD §6.9 (rewritten), §9.1/§9.4, §12.2, D8, R-4, R-8.
 
 ## 3. Deferred decisions (explicitly not made here)
 
@@ -304,9 +365,167 @@ Decision provenance classes, stated up front because reviewers must be able to a
 
 | OQ | Question | Needed by |
 |----|----------|-----------|
-| OQ-1 | Sign off ADR-D-02 posture (files-first + tripwires) — the only structural decision Phase 1 left *proposed*. | M0 design freeze |
-| OQ-2 | Confirm/adjust D-04 numbers (8/5.5 GiB) at review with C6 re-measure data in hand. | GPU-class enablement |
+| OQ-1 | **RULED 2026-11-17 — CLOSED: operator accepted ADR-D-02 as written ("OQ-1 accepted as written") — files-first + ~200-line runner + tripwires stands.** | ~~M0 design freeze~~ satisfied |
+| OQ-2 | Confirm/adjust D-04 numbers at review with C6 data. **2026-11-15 (review §5.3): static reservation alone is inadequate on a SHARED GPU — §6.8 adds a runtime used-memory re-check at dispatch + cuda-use-gate container on the device; GPU admission stays disabled until C6 passes; the accepted sharing decision (D-04) is unchanged.** | GPU-class enablement |
 | OQ-3 | Migration stance detail: PD-toolstack evidence repos stay frozen (user ruling says source-of-information only — confirm *read-only mirror* vs *do-not-touch* for the copy-into-registry step, ticket C3). | C3 execution |
-| OQ-4 | physics-gate endpoint wrapper (D-06) and registry/SQLite colocation (D-08) acceptance. | M0 design freeze |
-| OQ-5 | Job spawn channel: docker.sock mount vs scoped sidecar vs host-unit engine (TECHNICAL-DESIGN §6.2/§17.1). Security-critical; **M0 blocker**. | M0 build start |
-| OQ-6 | toolserver shares engine's SQLite WAL vs engine-internal HTTP (TECHNICAL-DESIGN §7.5). Coupling vs one-less-hop; reviewer call. | design freeze |
+| OQ-4 | physics-gate endpoint wrapper (D-06) and registry/SQLite colocation (D-08) acceptance. **2026-11-16: the D-08 half is CLOSED by the operator ruling (ADR-D-08 + A1 Accepted); the D-06 physics-gate half stays open for reviewer sign-off.** | M0 design freeze (D-06 half only) |
+| OQ-5 | Job spawn channel. **Decision request ADR-D-16 filed 2026-11-15 (FINDING-03, GitHub #4): recommendation = Option B hardened spawn-sidecar (socket never leaves its container; engine reaches only a 4-method HTTP API; allow-list enforces image pins, network=none, cap-drop, cpuset/mem, masked mounts). Honestly stated: a sidecar is privilege REDISTRIBUTION, not removal — a compromised sidecar is still root-equivalent on the host; what shrinks is the attack surface (4 audited methods vs the whole daemon API) for the container that also holds git PATs and user code. Option A rejected for that reason; Option C rejected for splitting one compose app (D-01). Operator decision required — nothing assumed.** **RULED 2026-11-16: operator selected Option B (scoped spawn-sidecar) — see ADR-D-16 Accepted. CLOSED.** | M0 build start |
+| OQ-6 | **Proposed resolution re-filed 2026-11-16 (r3) as ADR-D-08 Amendment A1:** shared-DB with explicit **submissions inbox** — toolserver INSERT-only on `submissions`; engine sole writer of `queue` + everything else; consume under `BEGIN IMMEDIATE` (r2 per-table dual-writer WITHDRAWN — TD §7.5's engine-side queue UPDATE contradicted it). Option B (engine enqueue API) and option C (dual-writer on `queue`) rejected with reasons. **Reviewer/operator verdict required — status Proposed, not Accepted.** **RULED 2026-11-16: operator ACCEPTED A1 — §8.4b/§7.5/§6.1 freeze as written. CLOSED.** | design freeze |
+| OQ-7 | **Bind topology** — D-15 (published `127.0.0.1:` ports + gateway-URL clients). Probe matrix (TD §5.4b) shows v1.0 loopback-only publish unreachable from containers, and the Ollama isolation premise in the pre-r2 text is factually false today (host bind `0.0.0.0:11434` [V 15b]). Operator accept required; do not assume approval. **RULED 2026-11-16: operator ACCEPTED Option D (dedicated he-agent network, 8100 unpublished) — see ADR-D-15 Accepted. CLOSED.** | agent reachability vs host-service exposure | operator (Steven) | design freeze |
+| OQ-8 | **MinIO version-history fallback (r5).** T-22 must prove the TD §6.9.3 export (payload-per-version + version manifest) at the deployed rclone/MinIO versions — the r2 `mc mirror`-history premise was verified false and retracted. If export sufficiency fails: latest-version-only backup + **explicit NFR-17 relaxation decision**. Lost capability if taken: restoring *superseded* promoted-object versions after total bucket loss (in-app versioning D-12 runtime + git-side promoted copies persist). Recorded *required-if-triggered*; **not adopted** — no silent weakening. **CONFIRMED 2026-11-16 by operator ruling: no action until T-22 reports; fallback activates only on T-22 failure.** | T-22 runtime result | reviewer + operator (Steven) | open (conditional — operator confirmed) |
+| OQ-9 | **OneDrive upload-completion proof (L4/L5) (r5).** Design-time host inventory: no credential-free automated signal reaches L4/L5 (TD §6.9.4) — placeholder attrs are negative-only, `DONE.json` stops at L2, robocopy exit 0 stops at L2. Options: **(A, M0 default)** recurring **manual web read-back** ritual logged to `drills/onedrive-readback.log`, R-8(ii) reminds if >7 d stale; **(B)** provision Microsoft **Graph** app registration (delegated token) → automated L5 read-back of the uploaded item. Until one lands, off-host durability — and any RPO resting on it — is **unproven** (NFR-19 says so). Verdict needed: accept A as routine / commission B / explicitly accept host-local durability. **RULED 2026-11-16: operator ACCEPTED Option A — manual web read-back ritual is the standing mechanism (logged to drills/onedrive-readback.log, R-8(ii) staleness nudge >7 d); B may be revisited later, C not taken. Off-host durability remains honest-by-ritual, not automated.** | design freeze | operator (Steven) | **open — RPO honesty depends on it** |
+
+---
+
+## 5. Records filed in the 2026-11-15 architecture-review response
+
+Provenance class at filing: all four **Proposed** (§0 vocabulary). D-15/D-16 changed
+security-relevant exposure and privilege and were explicit operator decision requests
+(review §7) — **[2026-11-16: operator ruled — D-15 ACCEPTED (Option D), D-16 ACCEPTED
+(Option B); see their records and Appendix E of the review response; this filing-time line
+is retained for history.]** D-17/D-18 are contract/semantics corrections inside author
+authority, marked Proposed pending the independent review.
+
+### ADR-D-15 — Toolserver reach topology: dedicated `he-agent` network, ZERO published ports (FINDING-01; review round-2 item 2)
+- **Status:** **ACCEPTED by operator ruling 2026-11-16 — Option D: dedicated `he-agent` compose network whose only members are the toolserver and the Hermes agent container; port 8100 is never published.** (was Proposed — network-topology change class; ruling recorded verbatim from operator). **Date:** 2026-11-15; rewritten 2026-11-16 after the r2 probes below invalidated the earlier draft.
+- **Context (all measured, never assumed):** the Hermes agent container runs on Docker-default
+  bridge, netns `172.17.0.0/24`. Measured facts that the design must respect:
+  1. Agent's own `127.0.0.1:8100` → refused (per-netns loopback — the v1.0 client URL was wrong, FINDING-01) [V 2026-11-15].
+  2. A port published `127.0.0.1:` on the host IS reachable from **any** container on the engine
+     via the gateway alias (`host.docker.internal`/`192.168.65.254`): same-engine listener
+     published loopback-only was hit from an unrelated throwaway container [V 2026-11-16
+     probe: 127.0.0.1:8197 published → foreign container → gateway alias **REACHABLE**;
+     unused control port refused]. **Loopback publishing therefore provides host/LAN exposure
+     control, NOT container isolation** — the earlier draft's claim that same-bridge access
+     "rests on the published-loopback bind holding" as an isolation property is **retracted**.
+  3. Both `172.17.0.1` and `host.docker.internal` traverse to host listeners from this
+     container (rev-a's `hdi refused` reading did not reproduce; retracted, see §5.1 TD) [V].
+- **Options:** (A) agent `network_mode: host` — rejected: agent on every host interface,
+  violates D-09. (B) join agent to the compose project default network — rejected: puts the
+  agent beside workflow-engine/MinIO, violates NFR-07 direction. (C) toolserver published
+  `127.0.0.1:8100:8100` + agent client via gateway IP — **superseded by this revision**: probe
+  fact 2 shows any unauthorized container reaches it the same way Hermes does, so it fails the
+  reviewer's negative requirement by construction. (D) **RECOMMENDED — dedicated
+  `he-agent` compose network whose only members are the toolserver service and the Hermes
+  agent container; toolserver publishes NOTHING for 8100.** Agent is joined once by the
+  operator: `docker network connect <project>_he-agent <hermes-container>` (manual connects do
+  not survive agent recreation — re-run after re-creation; `he doctor` checks membership and
+  re-runs both probes). Client URL `http://toolserver:8100` via network service DNS,
+  `HE_API_BASE` override retained.
+- **Demonstration (review r2 item 2 — both directions MEASURED 2026-11-16 on the real engine,
+  [V]; equivalents of production names used, throwaway objects removed after):**
+  - *authorized:* container multi-homed default-bridge + `docker network connect r2net`
+    (equivalent of `he-agent`) → `r2svc:8100` service DNS → TCP connect OK, **HTTP GET 200**.
+  - *unauthorized (fresh container, default bridge):* service name unresolvable (`gaierror`),
+    gateway alias :8100 → **refused** (nothing published), `172.17.0.1:8100` → **refused**.
+    Isolation is structural: there is NO route from a non-member to the port at all — it does
+    not depend on a bind flag staying correct.
+  - *host-side note (measured):* the WSL host does not route to dedicated-net container IPs
+    [V probe: host curl to 172.31.77.2:8100 failed], so host operator health/CLI uses
+    `make health` = `docker run --rm --network <project>_he-agent <curl-image> http://toolserver:8100/healthz`
+    — consistent with existing doctrine that host-side curl was never the acceptance test
+    (F1/T-15).
+- **Consequences:** §5.3/§5.4b/§6.4/§7.1/§11.3 carry mechanism D: compose gains top-level
+  `he-agent` network (in-project — the single-compose-project constraint holds); preflight
+  asserts **no `:8100` listener exists on the host at all** (strictly stronger than the old
+  "bare publish is a failure" rule); §10.2's "loopback = control" reframes to "**network
+  membership = control**" (still no HTTP auth — the boundary is now unambiguously the docker
+  network ACL, and Docker-desktop-managed vs manual-connect DNS behavior is covered by the
+  probe, not assumed). Residual, documented honestly: MinIO's operator-only published
+  `127.0.0.1:9000/9001` ARE gateway-reachable from any engine container [V probe fact 2] —
+  accepted residual, credential-gated, revisit if NFR-07 scope widens; the Ollama `*:11434`
+  corrective (bind `127.0.0.1`, operator action) stands on its own merits since gateway-path
+  reach is measured fact. T-15/T-17 carry both probe directions (positive 200 from member,
+  triple-refusal from non-member) as the acceptance test.
+- **Refs:** FINDING-01 (GitHub #2), review round-2 item 2, NFR-07, NFR-16, FR-01…08, D3; ADR-D-09 unchanged.
+
+### ADR-D-16 — Job-spawn privilege: scoped spawn-sidecar (Option B hardened) — RULED: Option B, operator ruling 2026-11-16, conflict resolved by operator 2026-11-17 (FINDING-03 / OQ-5)
+- **Status:** **ACCEPTED by operator ruling 2026-11-16 — Option B: scoped spawn-sidecar** (socket confined to the sidecar container; engine reaches only the 4-method API of TD §6.2b over `he-internal`; server-side allow-list enforcement as specified). **OQ-5 closed.** The honestly-stated residual stands: a compromised sidecar is still root-equivalent — the ruling adopts privilege *redistribution*, not elimination. **Date:** 2026-11-15; ruled 2026-11-16.
+- **Options evaluated in full at §13.1 (11 dimensions × 3 options). Summary:**
+  - **A. Mount `/var/run/docker.sock` into workflow-engine.** Zero new components; but the
+    engine container — the one that also mounts user-supplied ticket trees and holds git
+    credentials reachability — gains the **full daemon API = root-equivalent host control**
+    (any image, any mount incl. `/`, privileged, escape). Auditability: daemon logs only, no
+    semantic log. Enforceability: none at the caller.
+  - **B. Dedicated spawn-sidecar holding the socket; engine calls a 4-method HTTP API
+    (`create_run`, `status`, `kill`, `logs` — HTTP paths + payload schemas normative in TD §6.2b,
+  the single definitive spec) over the `he-internal` network.** Honest framing
+    (per the review's warning): **this is privilege redistribution, not elimination** — a
+    compromised sidecar is still root-equivalent on the host. What genuinely shrinks: the
+    attack surface reachable from the two containers that execute untrusted user code and
+    hold long-lived credentials (engine, toolserver) drops from *the entire daemon API* to
+    **four named operations** whose server side hard-enforces: image must be in the
+    digest-pinned allow-list (§11.2), `network=none`, `cap_drop=ALL` + non-root user,
+    cpuset/memory ceilings from §6.8, bind mounts restricted to `he-scratch`/`job-scratch`/
+    `inputs` path prefixes (rejects `/`, `/home/steven`, docker.sock itself — the sidecar
+    refuses requests A could honor), every call audited to `reconcile_log` with caller id.
+    Sidecar itself: read-only rootfs, no env secrets, no outbound network, restart=always.
+  - **C. workflow-engine as host systemd unit.** Smallest container privilege (engine gets no
+    socket at all; systemd unit runs as a dedicated non-root user added to the `docker`
+    group — still daemon-root-equivalent process on host, just not containerized). But it
+    splits the single compose application (D-01), loses image-pinned deploys for the engine
+    itself, and its crash/upgrade story is worse; the host process still touches state dirs
+    owned per D-05.
+- **Recommendation: B.** Smallest practical privilege boundary without new infrastructure
+  beyond one ~100-line container; keeps D-01 one-compose; audit log is semantic (who/what/
+  digest/limits per spawn). **This is a privilege arrangement and per review §7 it is the
+  operator's call: A buys simplicity with maximal blast radius, C buys engine de-containerizing
+  at the cost of D-01, B is recommended.**
+- **A1 (2026-11-17 r10):** clarification, not supersession. The round-9 OQ-1 ruling (RULED CLOSED —
+  files-first per ADR-D-02) governs the *workflow-state handoff* axis (engine↔toolserver artifact
+  and state exchange); it does **not** dissolve the *spawn-privilege* problem this record addresses:
+  the engine still needs solver containers started, and D-16 is where that privilege placement is
+  decided. The round-10 brief asked that D-16 be kept **Proposed pending the operator's decision**,
+  which conflicted with the round-6 ACCEPTED ruling recorded above; the conflict was flagged to
+  the operator in the round-10 PR note. **RESOLVED 2026-11-17 (round 11): the operator ruled
+  explicitly — the round-6 ACCEPTED ruling (Option B) stands.** Status = **ACCEPTED**; the
+  root-equivalence caveat above remains drawn unchanged everywhere. This is a design decision,
+  not an implementation: **nothing implements it before M0 exit**.
+- **A2 (2026-11-17 r10):** the four operations now have exact HTTP mapping in **TD §6.2b** (`POST
+  /v1/create_run`, `GET /v1/runs/<id>/status`, `POST /v1/runs/<id>/kill`, `GET /v1/runs/<id>/logs`) with normative
+  identity/authorization, idempotency, and timeout rows (paths locked r10 — earlier
+  `POST /v1/spawn` / bare-`GET /v1/runs/<id>` wanders are superseded by TD §6.2b verbatim).
+  **No `reap` operation is exposed** — reaping is the sidecar's internal janitor contract;
+  exposing one would require amending this ADR. Threat-model caveat stands: a compromised sidecar holds **root-equivalent Docker
+  privileges**; D-16 reduces the engine-reachable API surface, it does not eliminate host
+  privilege.
+- **Refs:** FINDING-03 (GitHub #4), OQ-5, §6.2/§13 (threat model), D-01/D-05/D-10 digest pins.
+
+### ADR-D-17 — MinIO is an optional dependency for execution; required only for promotion (FINDING-06)
+- **Status:** Proposed (independent review pending). **Date:** 2026-11-15.
+- **Resolution of the contradiction:** the design *intended* "solver runs while MinIO is down,
+  promotion degraded" but encoded "engine start depends_on MinIO healthy." Canonical now:
+  **MinIO is NOT required to start the engine or to run solvers** — `depends_on: minio:
+  condition: service_healthy` → `condition: service_started` + non-fatal probe; engine
+  retries bucket-existence lazily per promotion. **Promotion backlog is the DB table
+  `promotion_queue`** (already in the schema — now normative): engine enqueues promotion
+  intents transactionally with job completion, drains FIFO when MinIO returns; backlog
+  survives any outage because it lives in the WAL DB on the authoritative disk (D-05).
+  Liveness vs dependency health separated in the API **(r10 canonical, supersedes the earlier
+  `/health` component-map wording — no `/health` endpoint exists)**: `GET /healthz` = process
+  liveness ONLY (never 503 for dependency state); `GET /readyz` = readiness for the served
+  operation — MinIO down NEVER makes the core solver path unready; `GET /deps` = detailed
+  per-dependency status incl. MinIO `ok|unavailable` and `promotion_backlog` depth. Full response
+  schemas + status codes: TD §7.2; toolserver reports the same map mirrored from the engine's
+  `/deps` (single source). Per NFR-23 job/run payloads carry `evidence_available: bool`, and
+  T-10 proves `submitted → passed (promotion pending) → +promoted` across a kill-MinIO window.
+- **Refs:** FINDING-06 (GitHub #7), NFR-08 (unchanged), NFR-23, FR-27, §6.1, §7.2, D5/D6.
+
+### ADR-D-18 — One canonical API/state contract: HTTP 201 on POST /jobs; strict run⊃job boundaries (FINDING-07)
+- **Status:** Proposed. **Date:** 2026-11-15.
+- **Resolution:** FR-01 said 202, §7.2 said 201. **Canonical = 201 Created** (POST /jobs is
+  creation of a persistent resource; body `{job_id, queue_pos}`; OpenAPI 3.1 spec at
+  `/api/openapi.json` is the contract-of-record, requirements cite it — the doc set had no
+  OpenAPI before, and §7.2 now states examples match it). Requirement updated (v1.2), not the
+  design backwards. State boundaries (one table, every transition owner+trigger, §8.1):
+  **Run** = agent-file lifecycle (owner: engine runner / agent via `he`); **Job** = toolserver
+  queue + engine claim record (owner: toolserver until claimed, engine after); **gate result /
+  promotion** are run-scoped, not job states — the confusion surface FR-02 flagged. Physics
+  completion ≠ evidence promotion, stated as the invariant: a run may be `passed` with
+  `evidence_available=false` pending `promotion_queue` drain (ties to D-17). Error envelope +
+  error code table added §7.3 (previously scattered).
+- **A1 (2026-11-17 r10):** the TD §7.2 example's extra `state` field is WITHDRAWN — the normative
+  `POST /jobs` response body is exactly `{"job_id", "queue_pos"}`; idempotent replay returns the
+  same body with the original 201 (schema + replay semantics pinned in TD §7.2; fixtures TD §7.5).
+  T-08 asserts the exact key set; adding any field requires amending this record.
+- **Refs:** FINDING-07 (GitHub #8), FR-01…03, §7.2/§8, T-01, T-12, T-15.

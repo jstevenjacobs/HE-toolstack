@@ -1,7 +1,10 @@
 # HE-toolstack Technical Design Document
 
-**Document:** `HE-TOOLSTACK-TECHNICAL-DESIGN.md` · v1.0 · 2026-11-14
-**Status:** Draft for formal architecture review (Phase 2 deliverable A of DesignStandards §8)
+**Document:** `HE-TOOLSTACK-TECHNICAL-DESIGN.md` · v1.13 (rev 2026-11-17 **r13 — final-review exceptions closed: §14 ADR count 18→17 (§14 ADR-count phantom-gap note; §8.2 status aligned to ACCEPTED D-08 A1 (ruling 2026-11-16); §18 v1.2 self-assessment scoped as filing-time; prior r12 — documentation synchronization: App. B/C counts+baselines corrected, test baseline T-01…T-24, Q16-coherence wording; prior r11 — D-16 status confirmed ACCEPTED by operator (v1.1 filing-time label annotated)**; r10 — health/job/sidecar API contracts + v1.9 (rev 2026-11-17 **r9 — lifecycle ownership + diagram semantics**: class-C canonical enumeration (5 core incl. spawn-sidecar); make-down 6-step choreography = HOST RECIPE not engine; janitor 3-duties/3-owners; class-X exclusion in zero-assertion; D1/D3/D4/D9 redrawn; superseded socket-alternative drawings removed. v1.8 (rev 2026-11-17 r8: OQ-1 CLOSED — ADR-D-02 Accepted as written per operator ruling 2026-11-17; OQ/status mirrors updated. v1.7 r7 — network-isolation correction: bind-vs-publish separation made normative (§6.1/§11.3/§11.6), gateway client-URL probe retracted, six-leg T-15 isolation matrix referenced (§7.1/§10.1), Diagram 3 host-listener node fixed, D-15-accepted wording aligned; NOTE: the r6 ruling-record commit left this header line stale at v1.5 — caught in r7 recon; register flips themselves were verified at r6. Prior r5 rev: **round-5 backup corrections** — §6.9 rewritten (quiesce-and-wait §6.9.1; candidate→verify→DONE→NTFS-publish §6.9.2; MinIO version export §6.9.3 replacing the retracted mc-mirror-history claim; OneDrive L1–L5 proof ladder §6.9.4 with the explicit no-L4/L5-signal statement + OQ-8/OQ-9); §9.4 RPO reclassified local-completion; §9.6 restore-drill spec added; R-8 two-part staleness; D8 redrawn. Prior rev v1.4 (round-3 corrections — §8.8 ticket claim = flock(2) held-lock protocol; §7.5/§8.4b queue write-ownership resolved via submissions inbox. Earlier rev 2026-11-15b: review-response 2 — §6.2b normative spawn-sidecar API spec; §6.10 lifecycle classes + labels; §8.8 real claim mutual exclusion (O_EXCL lockfile arbiter); §6.7 WAL fairness corrected; §5.1 probe matrix re-run + Ollama bind finding [V]; D1/D2/D3/D4/D5/D8/D9 redrawn; prior v1.2: review response 1) · 2026-11-14
+**Status:** Revised for re-review (DESIGN STATUS: CHANGES REQUESTED response package; Phase 2 deliverable A of DesignStandards §8)
+**Revision log (v1.9 → v1.10, r10 health/contract canonicalization):** §7.2 `/healthz` pure-liveness row + `/readyz` + `/deps` rows + six-scenario canonical response table; non-normative `state` field removed from the 201 example (schema = exactly `{job_id, queue_pos}`); §6.2b cross-cutting rows (caller identity/audit, authz+root-equivalent caveat, idempotency, timeouts, explicit no-`reap`); §7.5 stray `/v1/jobs` paths → `/jobs`; §8.2 canonical four-state evidence ladder; `/health` retired from the normative set (NFR-23 canonical contract).
+**Revision log (v1.2 → v1.3, r2 second-review items 1–8):** sidecar API normative spec §6.2b (operation-canonical paths; ADR/QA/TD synced); §8.8 claim = O_EXCL lockfile CAS (rename-CAS was the reviewer's item-3 objection, valid); WAL db-wide-write correction §6.7/§7.5; network probe matrix corrected + host-bind audit §5.1/§5.3/§6.4/D1/D4 (the hdi-refusal claim was over-generalized — fixed); backup: mc-mirror version-history + cross-fs transfer (mv-is-atomic claim only holds same-fs) §6.9; diagrams D1/D4 now show sidecar+gateway; lifecycle label triple normalized §6.10. (v1.1 → v1.2 adds review-§5.5 failure-class taxonomy (§12.5) + R-9 drill; §5.1 session/claim protocol §8.8; §5.2 durability matrix §5.4a; §5.4 security-boundary table §5.4b; §5.3 admission-soundness note §6.4; FM-11…13; T-17…19 refs; OQ-7; gateway-form client URL).**
+**Revision log (v1.1):** F1 client URL/bind topology (§5.1 D1, §6.4, §7.1); F2 lifecycle classes + §6.10 + D9; F3 spawn-sidecar §6.2/§10.1; F4 per-table writers §6.7/§7.5/§8.2/§8.4; F5 backup procedure §6.9/§12.2; F6 MinIO dependency semantics §6.1/§6.5/§7.2/§12.3; F7 201 contract + state boundaries §7.2/§8; F8 counts/refs across the package.
 **Companions:** `HE-TOOLSTACK-REQUIREMENTS.md` (requirement IDs FR-xx/NFR-xx/T-xx/OR-xx),
 `HE-TOOLSTACK-ADR.md` (decision IDs D-xx/X-x/F-x/OQ-x), `PHASE1-ARCHITECTURE-DISCOVERY.md`
 (evidence inventory C1–C6, gaps G1–G11).
@@ -60,9 +63,9 @@ only Option A always available); hand-rolled runner bugs (crash-matrix T-07 is a
 acceptance artifact); host-disk SPOF (versioned MinIO tier is the copy); phantom-component
 recurrence (every §6 component lists its *existing* code lineage or is marked [P]).
 
-**Readiness.** Architecture is review-ready: requirements baselined (64 IDs, 100%
-trace-mapped), 12 ADRs (5 accepted incl. 3 user-rulled, 7 proposed pending sign-off), 4 open
-questions surfaced (OQ-1…4). No milestone's acceptance depends on an unverified premise.
+**Readiness.** Architecture is review-ready: requirements baselined (v1.3: 66 IDs, 100%
+trace-mapped), 17 ADR records (11 Accepted after the 2026-11-16/17 operator rulings — D-15 Option D, D-16 Option B, D-08+Amendment A1, **D-02 as written (OQ-1 closed 2026-11-17)**, plus earlier rulings D-01/D-03/D-04/D-05/D-09/D-12/D-14; D-06/D-07/D-11/D-17/D-18 remain Proposed),
+open questions surfaced (OQ-1…7). No milestone's acceptance depends on an unverified premise.
 
 ---
 
@@ -110,9 +113,9 @@ drill on versioned MinIO (T-11).
 ### 2.6 System boundaries
 Inside: compose project services (toolserver, workflow-engine, minio), spawned per-job
 tool containers, `heat-data` host dir, repo (`MANIFEST`, `workflows/`, CI).
-Outside (dependencies, §11.9): host Docker Engine + WSL2, host disk `/dev/sdf`, GitHub
+Outside (dependencies, §11.2): host Docker Engine + WSL2, host disk `/dev/sdf`, GitHub
 remote (ledger/git evidence), sglang LLM host `gx10-9d06` (192.168.1.102:8000, agent-side
-inference only [V]), Ollama embeddings (`host.docker.internal:11434` [V]), SSH to host
+inference only [V]), Ollama embeddings (host `:11434` [V] — **note:** host-verified bind is `*:11434` (all interfaces), NOT loopback-only [V ss 2026-11-15]; container reach is via gateway IP, and the `host.docker.internal` alias works from *desktop-docker-managed* containers only — the agent is reached today via 172.17.0.1; §5.1 matrix), SSH to host
 (port 2222). Boundary rule: nothing stack-owned may be created outside the compose project
 (NFR-10).
 
@@ -136,23 +139,23 @@ A1–A12) — this design adds A13–A15 and does not renumber them:
   co-resident stacks (813 GB free at audit [V]).
 
 ### 2.8 Initial release vs later releases
-Initial = M0–M2 (§16.1–16.4). Later = M3 fleet/multi-host (FR-41/42), M4 optimizer
+Initial = M0–M2 (§16. Later = M3 fleet/multi-host (FR-41/42), M4 optimizer
 automation (FR-41) — specified only as boundaries, not as promised functionality.
 
 ---
 
 ## 3. Requirements
 
-The normative baseline is `HE-TOOLSTACK-REQUIREMENTS.md` v1.0: **40 functional (FR-01…42,
-two reserved for M3+), 22 non-functional (NFR-01…22), 16 verification tests (T-01…16), 5
-open requirements (OR-01…05)**. Every row carries ID, description, priority, rationale,
+The normative baseline is `HE-TOOLSTACK-REQUIREMENTS.md` **v1.10** (r12-synced; was a stale
+v1.0 reference): **42 FR rows (FR-01…42; FR-41/42 reserved [M3+], 40 in the initial-release
+matrix), 24 NFR (NFR-01…24), 24 verification tests (T-01…T-24), 5 open requirements
+(OR-01…05)**. Every row carries ID, description, priority, rationale,
 verification method, acceptance criteria; §5 of that file is the requirement→component→test
 traceability matrix (script-verified 100% mapped, no dangling IDs). DesignStandards §3's
 mandatory categories are each populated: tool invocation FR-06…15, config generation FR-04,
 solver execution FR-10…14, GPU management FR-16…19, physics validation FR-20…22, workflow
 orchestration FR-23…26, artifact management FR-27…29, run tracking FR-31…32, registry
-FR-30…34, recovery FR-35…38, agent interaction FR-39…40; NFR categories map to §3.1–3.10 of
-the baseline (reliability/perf/scalability/security/maintainability/observability/
+FR-30…34, recovery FR-35…38, agent interaction FR-39…40; NFR categories map to REQUIREMENTS §3.1–3.10 (reliability/perf/scalability/security/maintainability/observability/
 portability/data-integrity/recoverability/extensibility). This design references those IDs;
 it does not restate or renumber them. Sections 5–16 carry a "covers:" line per component so
 reviewers can move both directions through the matrix.
@@ -201,8 +204,21 @@ sm_120)→C6 prerequisite; cleanup observation→NFR-12 per-ticket clause.
 ## 5. Target System Architecture
 
 ### 5.1 System context
-The agent runs in a Hermes container on the host's Docker Engine and reaches the stack via
-loopback HTTP (A14 [V]). The stack never calls the LLM; the LLM/embeddings services are
+The agent runs in a Hermes container on the host's Docker Engine. **FINDING-01 correction (v1.1, measured
+2026-11-15 from inside the agent container):** agent→`127.0.0.1:8100` is its *own* netns →
+refused [V]; `host.docker.internal` (192.168.65.254) **does** reach host listeners that are
+bound to non-loopback addresses [V corrected 2026-11-15: ollama `*:11434` was refused→then
+shown reachable: the v1.2 claim was tested against 8100-class loopback binds and
+over-generalized]; what is actually true per host `ss` [V 2026-11-15]: stack-class services
+must bind **127.0.0.1 only** on the host — such binds are reachable from the agent netns
+ONLY via the NAT gateway `172.17.0.1` (probe: TCP connect 172.17.0.1:11434 succeeded), never
+via the agent's own `127.0.0.1` [V]. Probe matrix, corrected: §5.1. For the **toolserver**
+boundary a stronger rule now applies [r2 item 2, D-15 rev. 2026-11-16]: a host-published port —
+even `127.0.0.1:` — is reachable from ANY engine container via the gateway alias [V probe
+2026-11-16], so publishing publishes to containers too, not just to the host. The toolserver
+therefore publishes NOTHING: agent and toolserver share a dedicated `he-agent` compose network,
+client URL `http://toolserver:8100` (service DNS), `HE_API_BASE` override retained. Both
+directions (member reaches 200; non-member triple-refusal) measured — ADR-D-15 Demonstration. The stack never calls the LLM; the LLM/embeddings services are
 *co-residents to protect* (D-04 floor), not dependencies of any job. TaSMET/OpenFOAM/OCCT/
 CoolProp are in-image dependencies; GitHub is the evidence remote outside the boundary.
 
@@ -210,17 +226,22 @@ CoolProp are in-image dependencies; GitHub is the evidence remote outside the bo
 graph TB
     subgraph Host["Host JSJ-Office (WSL2, RTX 5060 Ti, /dev/sdf 1TB ext4)"]
         subgraph Stack["HE-toolstack compose project (one lifecycle)"]
-            TS["toolserver :8100 loopback"]
+            TS["toolserver :8100<br/>zero published ports (D-15 rev)"]
             WE[workflow-engine<br/>queue+registry+runner]
             MO[minio :9000/:9001]
             JOB[per-job tool containers<br/>openfoam-esi / ta-solver-runtime /<br/>gmsh / calculix / agentcad / property-pipeline]
+            SC[spawn-sidecar<br/>sole docker.sock holder<br/>D-16 ACCEPTED 2026-11-16;<br/>root-equivalent if compromised]
         end
         HD[("heat-data host dir<br/>/home/steven/HE-toolstack/heat-data<br/>state+artifacts — D-05")]
         AG["agent / Hermes container<br/>(he client)"]
         EMB["Ollama embeddings<br/>:11434 — co-resident, protected"]
         TS --- HD; WE --- HD; JOB --- HD
-        AG -- "HTTP/JSON 127.0.0.1:8100" --> TS
-        TS --> WE; WE -- "docker run (host engine)" --> JOB
+        AG -- "HTTP/JSON via http://toolserver:8100<br/>(dedicated he-agent net, D-15 rev; zero publish [V])" --> TS
+        TS -- "INSERT INTO submissions ONLY<br/>(r3 inbox, §8.4b)" --> DB[(SQLite run_registry.db<br/>WAL; engine sole writer<br/>of queue + all else)]
+        TS --> WE
+        WE --> DB
+        WE -- "spawn/kill/status/logs<br/>(4-op HTTP, he-internal)" --> SC
+        SC -- "Docker API (sole socket holder)" --> JOB
         WE -- "promote (boto3)" --> MO
         JOB -- "nvidia runtime, flag-gated (C6)" --> GPU[(RTX 5060 Ti<br/>1 concurrent GPU job, ≤8 GiB)]
     end
@@ -244,7 +265,7 @@ graph LR
         TS[toolserver<br/>REST, OpenAPI, idempotency]
     end
     subgraph Control["Control plane (workflow-engine)"]
-        Q[(queue<br/>SQLite WAL)]
+        Q[(queue + submissions inbox<br/>SQLite WAL)]
         R[(candidate registry<br/>SQLite WAL)]
         RU[runner<br/>~200 LOC step exec]
         ADM[gpu-admission fn<br/>FR-16/17]
@@ -263,7 +284,7 @@ graph LR
         MI[(minio<br/>promoted immutable)]
         GI[(git ledger<br/>evidence)]
     end
-    TS --> Q; TS --> R
+    TS -->|INSERT submissions only| Q; TS --> R
     Q --> ADM; Q --> RU
     RU --> I1 & I2 & I3 & I4 & I5 & I6
     I1 & I2 --> PG
@@ -274,9 +295,17 @@ graph LR
 exists because D-03 deleted the responsibility into ADM.*
 
 ### 5.3 Physical / deployment architecture
-Single host; single compose project; toolserver published **loopback only**; MinIO published
+Single host; single compose project; toolserver published **NOTHING** — reachable from the
+agent only via the dedicated `he-agent` compose network (members: toolserver + Hermes agent
+container only; D-15 rev. 2026-11-16: measured proof that any published port, loopback
+included, is gateway-reachable from every engine container, so publish ≠ isolation —
+isolation is now structural membership; both directions probed [V], ADR-D-15 Demonstration).
+MinIO published
 on host for operator console only (config parameter `MINIO_CONSOLE_BIND=127.0.0.1`, §11.6 —
-[proposal], not current config). Spawned job containers attach the default `he-net` bridge
+[proposal], not current config; **host-state audit owed at M0**: co-resident third-party
+services on this box are demonstrably NOT loopback-bound today [V: ollama `*:11434`,
+sglang-proxy `*:3000`] — they are out of scope but named so the "loopback is the control"
+claim is scoped to stack-owned services only). Spawned job containers attach the default `he-net` bridge
 only when they need egress (none in initial release — tools run offline, an explicit
 posture: `network_mode: none` for solver jobs [P]).
 
@@ -285,34 +314,42 @@ graph TB
     subgraph WSL["WSL2 host JSJ-Office"]
         subgraph DE["Docker Engine (host)"]
             subgraph CP["compose project: he-toolstack"]
-                TSc[toolserver container<br/>user: non-root uid 1000]
-                WEc[workflow-engine container<br/>mounts heat-data + docker.sock-ALTERNATIVE]
-                MOc[minio container<br/>volume heat-data/minio]
+                TSc["toolserver container<br/>user: non-root uid 1000"]
+                WEc["workflow-engine container<br/>mounts heat-data rw<br/>NO Docker socket — D-16, FINDING-03"]
+                SCc["spawn-sidecar container<br/>sole /var/run/docker.sock holder<br/>D-16 ACCEPTED 2026-11-16"]
+                MOc["minio container<br/>volume heat-data/minio"]
             end
             J1[job container<br/>one-shot, network_mode none,<br/>bind: heat-data/runs/&lt;id&gt;/work]
         end
         HDD[("/dev/sdf ext4<br/>/home/steven/HE-toolstack/heat-data")]
-        LB["127.0.0.1:8100 toolserver<br/>127.0.0.1:9000/9001 minio (operator)"]
+        LB["host published ports: 9000/9001 minio only (operator,<br/>127.0.0.1 prefix; toolserver publishes NOTHING —<br/>reached via he-agent net, zero host listener [V D-15])"]
     end
     TSc --- LB; WEc -- bind mount rw --> HDD
     J1 -- bind mount rw --> HDD; MOc -- bind mount rw --> HDD
-    WEc -. "spawn channel = OPEN QUESTION OQ-5 (§17.1):<br/>socket mount vs sidecar vs host unit" .-> J1
+    WEc -. "4-op HTTP over he-internal (D-16=B)" .-> SCc
+    SCc -- "Docker API (socket)" --> J1
 ```
-*Diagram 3 — deployment boundaries. The job-spawn channel is a tracked open design item
-(OQ-5 §17 / §6.2): mounting `docker.sock` is the known-simple path but grants container
-escape-class power; alternatives listed there rather than hand-waved.*
+*Diagram 3 — deployment boundaries (r9 redraw). The job-spawn channel was OQ-5; the operator
+ACCEPTED Option B (scoped spawn-sidecar, ADR-D-16, 2026-11-16) — shown as the current
+architecture. The honest residual is drawn with it: the sidecar is the sole socket holder and
+remains **root-equivalent on the host if compromised** — privilege redistribution, not
+elimination (D-16 ruling text). The superseded Option-A drawing (socket mounted into the
+engine as "ALTERNATIVE") is removed: the engine never sees a socket under any option.*
 
 ```mermaid
 graph LR
-    AGENT[agent container] -- "HTTP 127.0.0.1:8100" --> TS[toolserver]
+    AGENT[agent container<br/>default bridge +<br/>connected to he-agent net] -- "HTTP http://toolserver:8100<br/>(he-agent net member only; zero publish [V])" --> TS[toolserver]
     OPS[operator ssh :2222] -- "compose/CLI + :9001 console" --> STACK[compose project]
     TS -- "HTTP in-project :8200 (bridge he-net)" --> WE[workflow-engine]
-    WE -- "job spawn: docker API" --> DE[host engine]
+    WE -- "spawn: 4-op HTTP<br/>(D-16 ACCEPTED 2026-11-16)" --> SC[spawn-sidecar<br/>he-internal only;<br/>sole docker.sock holder;<br/>root-equivalent if compromised] -- "Docker API (socket)" --> DE[host engine]
     WE -- "S3 API :9000 in-net" --> MO[minio]
     STACK -. "HTTPS outbound (git push only)" .-> GH[GitHub]
 ```
-*Diagram 4 — network communication. No inbound path exists from LAN or compose net to the
-toolserver (NFR-07, T-15); external egress is git-over-HTTPS and nothing else in M0.*
+*Diagram 4 — network communication (r7). The agent↔toolserver path exists only on `he-agent`
+(zero host publication, D-15 Accepted). No inbound path is claimed from LAN or any non-member
+namespace: expectations for every route are derived in the T-15 six-leg matrix (§5.4b) and
+EXECUTED at M0 before NFR-07 is marked satisfied. External egress is git-over-HTTPS and nothing
+else in M0.*
 
 ### 5.4 Architectural principles
 1. **One lifecycle per system** (D-01). Implication: every service has compose healthcheck +
@@ -322,6 +359,8 @@ toolserver (NFR-07, T-15); external egress is git-over-HTTPS and nothing else in
    deletion is always safe, which makes the cleanup rule enforceable (NFR-12).
 3. **Write-ahead ordering is protocol, not convention**: artifacts fsync → state.json atomic
    rename → ledger append + git push. Implication: every crash window has a defined recovery
+   (see §5.4a for the exact fsync/durability matrix — what is guaranteed by code vs by
+   filesystem behavior is stated there, per review §5.2)
    (§12 FMEA rows FM-6/FM-8) and the crash matrix T-07 is a required M0 artifact.
 4. **Thin, domain-agnostic core** (SD inheritance [E]): engine/queue/gate code contains zero
    TaSMET/OpenFOAM specifics; domain knowledge lives in images + job-type registry rows.
@@ -343,6 +382,48 @@ toolserver (NFR-07, T-15); external egress is git-over-HTTPS and nothing else in
 
 ---
 
+
+### 5.4a Durability matrix — what fsync guarantees vs what filesystem behavior guarantees
+[review §5.2, added 2026-11-15; normative for §8.6 and T-07]
+| Step | Operation | Durability mechanism | Guarantee if process killed | Guarantee if power/host dies |
+|------|-----------|---------------------|-----------------------------|------------------------------|
+| 1 job outputs | worker writes `jobs/<id>/out/…` + `manifest.json` last | `fsync(file)` then `fsync(dir)` before manifest rename [code requirement, T-07 asserts via syscall trace or crash-point test] | complete (kernel flushes on process exit) | complete only if data already on platter; **crash-point test tolerance**: partial output = incomplete manifest ⇒ §8.6 re-queue |
+| 2 state.json | write temp → `fsync` → `os.replace` → `fsync(dir)` | atomic rename (ext4 guarantee: rename is atomic w.r.t. readers) + dir fsync for rename persistence | readers see old-or-new, never torn (FM-8) | same, with ≤ one rename-window uncertainty — resolved by §8.6 ordering rules |
+| 3 ledger | append line → `fsync` → git push later | append-only + fsync | partial line possible at EOF ⇒ **ledger reader tolerates trailing torn line** (parse-lenient; last-good-line checkpoint in state.json) | same |
+| 4 git push | network op | not a durability step (copy, not authority); retry queue (FM-9) | drained on retry | drained on retry |
+**Declared dependencies on filesystem behavior:** ext4 with `data=ordered` default (WSL2 default [V preflight]) — rename atomicity + rename-on-write are relied upon; **not** relied upon: delayed-allocation atomicity of *content* writes (hence explicit fsync in rows 1–2); **not** relied upon: O_DIRECT (absent). SQLite rows: SQLite's own WAL fsync discipline (per SQLite docs [V]), engine adds none. Disk-failure beyond OS crash is explicitly outside every row — RC-5/backup territory (§12.5). **Boundary note (r5): every rename-atomicity guarantee here is SAME-filesystem (ext4) only — the backup publication path crosses into `/mnt/c` (NTFS via 9p/DRVfs) where POSIX rename does not span the boundary and durability semantics differ entirely; the backup protocol therefore uses copy + destination digest verification + completion marker (§6.9.2), never a cross-FS rename claim.**
+
+### 5.4b Security-boundary table [review §5.4, added 2026-11-15 — one place, all boundaries]
+| Boundary | Mechanism | Credential crossing it | Blast radius if crossed |
+|----------|-----------|------------------------|-------------------------|
+| agent → toolserver | dedicated `he-agent` network membership ONLY — zero host publication makes every gateway/bridge path structurally impossible (T-15 matrix §5.4b; §6.1, D-15 Accepted) | none — **network membership is the boundary**: it is an access-control mechanism enforced by Docker routing, NOT authentication; any `he-agent` member acts as the operator (credential-equivalent; §10.2) | can submit/inspect jobs as operator — same trust class as operator shell |
+| toolserver → engine | compose-internal network, service DNS (§7.5) | none | engine is same trust class (both operator-owned code) |
+| engine → Docker daemon | **ruled 2026-11-16 (OQ-5 closed, D-16 Option B)**: sidecar holds the socket, engine talks narrow HTTP (§6.2b spec) | sidecar exposes ONLY `create_run`/`status`/`kill`/`logs` (§6.2b paths) for digest-pinned images | with sidecar: one container's lifecycle; with raw socket (rejected option): full host root |
+| solver container | `--user`, `--pids-limit`, mem/cpu caps, single bind `jobs/<id>/` rw (§6.2), `--network none` for batch phases | none — inputs arrive pre-staged on its bind; no token in env | only its own job dir |
+| MinIO credentials | root creds compose-env (operator-only ports `127.0.0.1:9000` [V §11.3]); service account per-writer bucket prefix [P] | engine holds promote-scoped service key, toolserver none | evidence bucket (delete-able tier, not authority) |
+| Git credentials | host-side only — ledger push runs via host git askpass [E proven PD pattern]; **no git creds inside any container** [V: current PD-toolstack push is host/session-side] | n/a into containers | cannot be leaked by a container compromise |
+| host filesystem | heat-data owned `steven:1000`, containers run `user: 1000:1000` (§11.3) | file perms = only gate | heat-data subtree; host OS unreachable (no socket in containers, §6.2) |
+| network isolation | dedicated `he-agent` net for the API (zero publish, D-15 rev); remaining published ports all `127.0.0.1:` prefix (host/LAN control — **not** container isolation, measured [V]); solver `--network none` at batch | — | LAN never exposed; accepted residual: MinIO `127.0.0.1:9000/9001` remain gateway-reachable from engine containers, credential-gated (D-15 Consequences) |
+This table is the checklist answer for review §5.4; each row's [E]/[V] tag is the same evidence discipline as elsewhere.
+
+
+**T-15 isolation probe matrix (r7, mechanism-derived expectations; execution due M0 —
+NFR-07 is NOT marked satisfied until run; design contract per §10 STOP):**
+
+| Leg | Source namespace (IP class) | Destination | Expected | Enforcement mechanism |
+|-----|------------------------------|-------------|----------|------------------------|
+| 1 Hermes agent | agent container (default bridge + `he-agent` member) | `http://toolserver:8100/healthz` (service DNS) | **reachable, 200** | `he-agent` membership (only path) |
+| 2 Peer on Docker default bridge | fresh container, default bridge only (`172.17.0.0/16`) | (a) `http://toolserver:8100` (b) `http://172.17.0.1:8100` (c) `http://host.docker.internal:8100` | (a) **DNS unresolvable** (b) **refused** (c) **refused** | (a) not on `he-agent`; (b/c) **no host listener exists** — zero published port |
+| 3 Container on compose net | fresh container joined to project `he-net` | (a) `http://toolserver:8100` (b) `http://<toolserver-task-ip>:8100` | **(a) unresolvable, (b) refused** if the service has no `he-net` alias; **reachable → FINDING** if it does | service attached to `he-agent` only; leg 3 is the design's discriminating test |
+| 4 Host-local | WSL host shell (`127.0.0.1`, `172.17.0.1`) | `http://127.0.0.1:8100`, `http://172.17.0.1:8100` | **refused** (nothing listening) | zero host publication; preflight asserts absence (§11.3) |
+| 5 LAN-side | separate machine on LAN → WSL host IP :8100 | TCP :8100 | **refused/closed** (no listener; also subject to WSL NAT) | zero publication — replaces the old "port closed because loopback-bound" expectation, which described the RETRACTED publish model |
+| 6 Other bridges/paths | container on any other local bridge (e.g. `br-<id>` networks) | `http://<gateway-ip-of-that-bridge>:8100` | **refused** | no host listener on any interface; measured precedent [V 2026-11-16]: published ports WERE gateway-reachable from any bridge on this engine — absence of publication is what closes every leg |
+
+**Anti-claim guard (r7):** loopback binding is not authentication or authorization, and a
+loopback-published port still accepted connections from other containers on this engine
+(measured). The only structural control is **absence of a host listener + named-network
+membership**; container-IP allow-lists are explicitly rejected (IPs are ephemeral).
+
 ## 6. Detailed Component Design
 
 Component inventory note (DesignStandards §6 lists "Solver service" and "GPU broker" as
@@ -358,30 +439,47 @@ proven by ledger.
 ### 6.1 Toolserver  [P — thin; lineage: no prior HTTP server existed; agent called scripts directly [E]]
 - **Problem/necessity:** the agent needs one narrow, contract-testable door into jobs,
   queue, registry and gate — instead of ssh-and-pray shell access (attempt-1 practice). It
-  is also the single place loopback security (NFR-07) and idempotency (FR-39) live.
+  is also the single place reach-control for the API (NFR-07: `he-agent` network **membership**, zero published port — D-15 rev) and idempotency (FR-39) live.
 - **Owns:** HTTP request validation, job submission records, idempotency-key store,
   OpenAPI surface, error envelope. **Explicitly does not own:** scheduling (engine), state
   writes into workflows/ (runner), physics verdicts (gate scripts), MinIO credentials
   (engine's promote worker holds them).
 - **Internal modules [P]:** `api.py` (FastAPI app, ~400 LOC budget), `jobs_repo.py`
-  (SQLite via same WAL file as engine — single-writer discipline: engine opens RW, toolserver
-  opens read + insert-queue only), `idempotency.py` (key→job-id map, 24 h window),
+  (SQLite via same WAL file as engine — **r3 ownership (canonical §8.4b)**: toolserver opens RW for
+  `INSERT INTO submissions` **only** (queue/idempotency dedup moved engine-side at consume,
+  §7.5); engine owns every other table; everything else read-only. **WAL note (r2 item 7):** SQLite WAL serializes
+  writes **database-wide** — one write transaction at a time across ALL tables, not per
+  table — so *table ownership is an application-level discipline* (prevents logical
+  write-write conflicts on the same rows), not a SQLite enforcement; `busy_timeout 5 s`
+  retries with **no fairness guarantee** (busy is retried, not queued FIFO), so a writer can
+  be starved under sustained load [V: SQLite WAL docs]. `idempotency.py` (key→job-id map, 24 h window),
   `errors.py` (single envelope §7.3).
 - **Tech/version:** python 3.12-slim base (same base as property-pipeline image pattern [V]),
   FastAPI + uvicorn (versions pinned at first build; no version claimed here — none verified).
-- **Interfaces:** §7.2 (all endpoints). **Configuration (§11.6):** `TS_BIND` (default
-  127.0.0.1 — enforced non-overridable in entrypoint check), `TS_PORT=8100`,
+- **Interfaces:** §7.2 (all endpoints). **Reachability (D-15 rev 2026-11-16):** **agent-side
+  (`he`) → `http://toolserver:8100`** over the dedicated `he-agent` network (§7.1 canonical;
+  agent joined by operator `docker network connect`, re-asserted by `he doctor`); host-side
+  CLI/health → `make health` (one-shot container on the he-agent net — host does not route to
+  dedicated-net IPs [V probe], and the toolserver publishes NO port). **Normative: any
+  `:8100` host listener (bare OR loopback-prefixed) is a preflight failure** (§11.3) —
+  publishing a port publishes it to every engine container, measured [V 2026-11-16]. **Configuration (§11.6 — two distinct layers, r7):** (1) *inside-container listen address*
+`TS_BIND=0.0.0.0` — the process must bind `0.0.0.0` on its container interface; a loopback
+in-namespace bind would make Docker's forwarding path unable to reach it, and an in-namespace
+`0.0.0.0` bind is **not** exposure (the namespace is the boundary). (2) *host publication* —
+there is **none for 8100** (D-15 rev: zero published ports; exposure control is no longer a
+`ports:` prefix question at all). One variable must never stand for both layers (r7 item B).
+`TS_PORT=8100`,
   `HE_DATA=/data`, `QUEUE_DB`, `IDEMPOTENCY_TTL`.
 - **Persistence:** none of its own beyond queue DB rows + idempotency table.
 - **Startup/shutdown:** compose `depends_on: workflow-engine: condition: service_healthy`;
   boot = open WAL read/insert, serve; SIGTERM = drain in-flight HTTP (≤5 s), no job state to
   flush (all durable state is in SQLite WAL).
-- **Health/logging:** `/healthz` (DB open + writable check); JSON stdout logs with
+- **Health/logging (NFR-23 canonical):** `/healthz` = pure liveness (event loop serving; a DB-open failure is surfaced via `/readyz`/`/deps`, not liveness — r10 alignment); JSON stdout logs with
   `run_id/job_id` fields (NFR-13).
 - **Failure modes:** crash ⇒ zero data loss (stateless edge; agent retries with same
   idempotency key, FR-39); WAL lock contention with engine ⇒ single-writer ordering means
   toolserver inserts are rare small writes; p95 read target NFR-04 (T-09 under load).
-- **Security:** loopback-only bind, non-root uid 1000, no MinIO creds, request body caps
+- **Security:** reach = `he-agent` network membership only (zero host publication; any host `:8100` listener = preflight failure), non-root uid 1000, no MinIO creds, request body caps
   (artifact pointers not bytes — §7.4), CORS off.
 - **Testing:** contract suite T-08 (OpenAPI fixtures incl. error envelope, idempotency
   replay, 413/409/422 paths). Deployed as compose service `toolserver` (§11.3).
@@ -393,18 +491,24 @@ proven by ledger.
   survives agent-context loss, and enforces the write-ahead protocol (§5.4-3) in one place.
   This is the component that *replaces* both the never-built gpu-broker and the LangGraph
   leaning (D-02/D-03).
-- **Owns:** queue rows, job leases (single-writer within this process), worker seam,
+- **Owns:** queue rows (**sole writer**, fed by the toolserver's `submissions` inbox §7.5), job leases (single-writer within this process), worker seam,
   `workflows/` state law enforcement, ledger appends, promotion triggers. **Does not own:**
   HTTP edge (§6.1), physics logic, image builds.
 - **Internal modules [P]:** `queue.py` (SQLite WAL, states §8.2, one-writer loop),
   `admission.py` (GPU budget fn: nvidia-smi-when-available + reservation ledger, FR-16/17;
   pure function, unit-tested with simulated values — T-06 — because C6 is unresolved),
-  `worker_docker.py` (**the Worker seam**: interface `Worker.spawn(job_spec)->handle`;
-  initial impl spawns via Docker; how the engine container reaches the Docker daemon is
-  OQ-5: (a) mount host `docker.sock` — simplest, grants escape-class power, chosen only if
-  operator accepts (b) a second tiny "spawn-sidecar" container with the socket, shrinking
-  blast radius to it, (c) engine runs as a host systemd unit, no socket in any container.
-  Decision needed at M0 — §17 OQ-5), `runner.py` (~200 LOC: read `workflows/<flow>/state.json`
+  `worker_docker.py` (**the Worker seam**: `Worker.spawn(job_spec)->handle`; v1.1 per
+  FINDING-03: engine never sees a Docker socket under any option. Option B (**ACCEPTED — operator ruling 2026-11-16**, ADR-D-16): engine calls the `spawn-sidecar` HTTP API
+  (the four operations of ADR-D-16 with **paths canonicalized to the operations**:
+  `POST /v1/create_run`, `GET /v1/runs/{id}/status`, `POST /v1/runs/{id}/kill`,
+  `GET /v1/runs/{id}/logs` — full spec §6.2b) over the `he-internal` net; expired-
+  container reclamation is the sidecar's own janitor timer, not an engine-facing method;
+  sidecar exclusively holds `/var/run/docker.sock` and **server-side** enforces the spawn
+  contract (digest allow-list §11.2, `network=none`, cap-drop/non-root, cpuset+mem ceilings
+  §6.8, bind paths ⊂ `{he-scratch, job-scratch, run inputs}` only) + semantic audit row per
+  call. Options A (socket→engine) and C (host systemd engine) remain open for the operator;
+  the honest cost of B is one more container and one more failure mode (sidecar down =
+  dispatch stall, detectable, queue keeps work). `runner.py` (~200 LOC: read `workflows/<flow>/state.json`
   → claim next ticket → exec step → write-ahead per D-05), `promote.py` (boto3 client →
   MinIO, gated by FR-29 rule), `ledger.py` (append + git push + local-commit queue when
   remote unreachable, A13).
@@ -414,20 +518,63 @@ proven by ledger.
 - **Concurrency control:** `max_concurrency` per class (cpu: cores-based default 2 [P];
   gpu: **1** hard, D-04); GPU class refuses to start any job while
   `GPU_CLASS_ENABLED=false` (default until C6 passes — FR-18).
-- **Startup/shutdown:** boot = crash-recovery pass (§8.6: reconcile running-state jobs vs
-  container reality), then loop; SIGTERM = stop claiming, finish current step boundary, WAL
-  clean close.
-- **Health/logging:** `/healthz` (loop heartbeat <30 s old), queue-depth gauge in JSON logs;
+- **Startup/shutdown (v1.1, FINDING-06 — MinIO reclassified as OPTIONAL dependency,
+  ADR-D-17):** boot = crash-recovery pass (§8.6: reconcile running-state jobs vs container
+  reality), then loop; **MinIO is waited for ≤60 s and boot proceeds regardless** with
+  `minio=unavailable` in health — job dispatch and physics never block on MinIO (FR-13
+  promotion is async). SIGTERM = stop claiming, drain per §6.10 class-J rules, WAL clean
+  close. Compose `depends_on: minio: condition: service_healthy` is demoted to
+  `service_started` (§11.3) so a MinIO crash-loop can never wedge engine startup.
+- **Long-running jobs, cancellation, reconciliation (review §5.1, explicit 2026-11-15):**
+  a solver container is a **child of the dockerd daemon, not of the engine process** —
+  engine restart (RC-1/RC-2) does not kill a running job; boot reconcile (§8.6) re-adopts
+  it by container label probe (`heat.job_id`) within the lease window. Cancellation is
+  engine-driven: `/jobs/{id}/cancel` → queue flag → engine sends SIGTERM to the container
+  (grace 30 s [P]) → kill; the terminal state is written by the engine, not the job.
+  Reconciliation runs at **boot and every 60 s tick**: for each `running` row, the
+  sidecar's container-exists query is ground truth (state vs daemon, §6.2); mismatches
+  resolve via the §8.6 matrix — never silently.
+- **Health/logging (v1.1 F6/NFR-23):** `/healthz` = **pure liveness** (loop heartbeat
+  <30 s old; never 503s for dependency loss); `/readyz` = readiness for required deps (DB + sidecar);
+  MinIO appears in `/deps` (`{minio: ok|down, sidecar: ok|down|absent, docker: via-sidecar, promotion_backlog: n}`)
+  but NEVER gates solver-execution readiness (D-17); queue-depth gauge in JSON logs;
   every state transition emits one structured event (run_id, from, to, cause).
 - **Failure modes/recovery:** full matrix T-05/T-07; crash mid-claim = lease timeout
   re-queues (idempotent step exec: step re-run sees its own artifact manifest and skips —
   FR-38); WAL survives kill -9 (NFR-02).
-- **Security:** sole holder of MinIO root creds (§10); sole writer to `workflows/`; if OQ-5
-  lands on docker.sock, that container is the security-critical one (review gate).
+- **Security:** sole holder of MinIO root creds (§10); sole writer to `workflows/`. Under
+  the accepted OQ-5=B shape (operator ruling 2026-11-16) the **security-critical container is the spawn-sidecar** (§10.1
+  threat model row; review gate), not the engine — engine compromise caps at queue/workflow
+  integrity + sidecar-API abuse within the allow-list, not host root.
 - **Performance:** queue ops are sub-ms local SQLite [P, measure at M0]; step overhead
   budget counted into OR-01 timing (NFR-03 flag).
 - **Testing:** unit (admission math, lease logic), integration (queue+reboot T-05), crash
   matrix T-07, cold-session harness T-02. **Deployed:** compose service `workflow-engine`.
+
+### 6.2b Spawn-sidecar API — normative specification  [r2 item 6; single source of truth]
+One operation vocabulary and one path set for **all** documents (ADR-D-16 lists the
+operations; this table is the wire contract; §11.6 knobs `SIDECAR_BIND`,
+`SIDECAR_ALLOWED_IMAGES` apply). HTTP/1.1 over `he-internal`, mTLS **deferred to M0 build**
+[proposal: shared-secret bearer token from sidecar-only tmpfs file until then]; all bodies
+JSON; unknown fields `422`.
+
+| Operation (canonical) | Method + path | Request (core fields) | Success | Notable errors |
+|---------|----------------------|----------------------|---------|----------------|
+| `create_run` | `POST /v1/create_run` | `{image_digest, cmd[], env{}, binds[{src,dst,ro}], labels{he-run,he-job-id}, cpuset, mem_limit, network:"none"}` | `201 {container_id, pid}` | `403 not_allowed` (digest ∉ allow-list, bind prefix, network≠none, caps); `422` schema; `429` per-run cap (`SIDECAR_MAX_RUNNING`) |
+| `status` | `GET /v1/runs/{id}/status` | — | `200 {state, exit_code?, started_at?, finished_at?}` | `404 no_such_run` (unknown/foreign id — no existence oracle) |
+| `kill` | `POST /v1/runs/{id}/kill` | `{signal: "term"|"kill", grace_s}` | `202` (idempotent: terminal → `200 already_terminal`) | `404` |
+| `logs` | `GET /v1/runs/{id}/logs?tail=N&since=` | — | `200 {lines[], truncated}` | `404`; `413` tail > 1 MiB |
+
+**Cross-cutting contract rows (normative, r10):**
+- **Caller identity & audit:** `caller_id` = the `he-internal` peer token principal (shared-secret bearer until M0 mTLS, above); every call writes exactly one `sidecar_audit` row: `{ts, caller_id, op, run_id?, image_digest?, verdict, deny_reason?}`.
+- **Authorization / trust assumptions:** reach = `he-internal` membership (the only route to the port — same structural zero-publish pattern as D-15 for the toolserver); the sidecar trusts *reach*, then enforces server-side: digest allow-list, `network=none`, `cap_drop=ALL`+non-root user, bind-prefix allow-list (§6.2). Threat-model caveat **stands unchanged**: a compromised sidecar is still **root-equivalent** on the host — this API reduces the surface reachable from engine/toolserver; it does **not** eliminate host privilege (ADR-D-16).
+- **Idempotency:** `create_run` is **not idempotent** (caller-generated `he-job-id` label = dedup key: a second live container for the same `he-job-id` ⇒ `409 dup_run`); `status`/`logs` read-only idempotent; `kill` idempotent (terminal ⇒ `200 already_terminal`). No `Idempotency-Key` header applies below `/v1/` — the label scheme is the mechanism.
+- **Timeouts:** server answers `create_run`/`kill` ≤ 5 s (`create_run` returns at container-created; never waits for exit); `status`/`logs` ≤ 2 s; §7.1 client defaults apply (10 s + 3× backoff on 5xx/conn); sidecar's own docker-API deadline 5 s exceeded ⇒ `500 spawn_timeout`, any created container is reaped by the janitor like any orphan.
+- **No fifth operation:** reaping stays the sidecar's internal janitor duty (`SIDECAR_REAP_AFTER_S`, default 900 [P]) — **no engine-facing `reap` exists and none is added**; changing that would require an explicit ADR-D-16 amendment. Server-side enforcement
+matrix per operation = §6.2 contract paragraph; every call writes one `sidecar_audit` row
+(caller-id from `he-internal` peer cert/token, operation, digest, verdict). **QA gate:** the
+gate script extracts operation+path strings from TD/ADR/QA/REQ and asserts they equal this
+table (r2 item 6 closure condition).
 
 ### 6.3 Physics-gate  [asset: gate.py + probes + negative test proven D2 [E]; wrapper [P thin]]
 - **Problem/necessity:** no run may claim `succeeded` without a verdict (FR-20); attempt-1
@@ -468,6 +615,15 @@ proven by ledger.
   uses GPU (FR-19).
 - **Testing:** T-06 pure-function suite over simulated `nvidia-smi` matrices + flag-off
   refusal + boundary math; live variant runs only after C6.
+- **Admission-math soundness review (review §5.3, 2026-11-15):** the inequality
+  `reserved + ceiling ≤ total − floor` is **conservative against the known floor**
+  (4.98 GiB observed LLM/embedding co-residency [E]) but NOT against *unmodeled* consumers
+  (a browser using the dGPU, Windows desktop compositor). Two honesty clauses added:
+  (a) `nvidia-smi memory.used` is sampled and treated as **advisory-only** (WSL2 under-reports
+  Windows-side allocations — known limitation, so the *floor* is the safety mechanism, the
+  sample can only make admission stricter, never looser); (b) OOM failure mode FM-4 is
+  accepted-realistic: worst case is one killed job + console re-queue, never host instability
+  claim. **No numbers changed** (D-04 accepted; OQ-2 still gates activation — unchanged).
 
 ### 6.5 MinIO / artifact storage  [existing image pattern [E]; now in-project (D-01); promote worker [P thin]]
 - **Problem/necessity:** attempt-1's one *successful* storage story (backup/restore drill)
@@ -505,7 +661,7 @@ proven by ledger.
   (NFR-18 contract).
 - **Testing:** T-08 client-side fixtures; T-02 proves *nothing essential* needs the client.
 
-### 6.7 Candidate registry  [P; lives in the engine's SQLite (D-08), one file, one writer]
+### 6.7 Candidate registry  [P; lives in the engine's SQLite (D-08), one file, **per-table writers** — engine sole writer of `candidates` (F4 wording fix: v1.0 "one writer" per-file was ambiguous)]
 - **Problem/necessity:** M3 optimizer work (and human review) needs "what have we tried,
   with what config, what gate verdict, where is the evidence" — attempt-1 had the D-ledger
   prose but no queryable store (G-gap, P1).
@@ -538,39 +694,240 @@ proven by ledger.
 - **heat-data layout:** normative tree §9.2 + Appendix directory listing.
 
 
-### 6.9 Host backup job  [thin host timer, in-repo `deploy/backup/` [P]; not a compose service]
-- **Problem/necessity:** D-05 makes one host dir authoritative — off-box copies are the only hedge
-  against disk loss, and attempt-1 proved drills are worthless unless they run against the *real*
-  destination. The user ruling of 2026-11-15 (D-14) fixes the destination so drift is impossible.
-- **Destination (canonical, non-negotiable):** `/mnt/c/Users/steven/OneDrive/Backup/HE-toolstack/`
-  — Windows path (OneDrive Backup folder), WSL-visible at the same path from the agent container and
-  from host WSL (verified on host 2026-11-15; `HE-toolstack/` subdir exists). OneDrive gives
-  cloud-side versioning + off-site replication for free.
-- **Layout:** `heat-data/` (nightly rsync mirror of `heat-data/` incl. the MinIO in-dir volume ⇒
-  backup = one dir), `repo/` (nightly `git bundle` of `workflows/` + ledger), `drills/` (T-11
-  restore-drill evidence). **Does not own:** scheduling durability (a host timer, not a service —
-  missed runs are loud: a ledger line + watermarks; compose stays 100% lifecycle per D-01).
-- **Caveats stated openly [V/E]:** writing into a OneDrive folder means Files-On-Demand placeholder
-  files and sync races — restore must force full download (`tree /sync` or `attrib -u`) and verify
-  sha256 vs registry digests (D8 does exactly this); solver I/O on /mnt/c stays prohibited (X-8 —
-  backups are cold sequential copies, not hot solver paths; no contradiction).
-- **Key interfaces:** none in-stack; the *restore path* is R-4 (fresh dirs → `make up` → T-11 digest
-  compare → M0 smoke).
-- **Testing:** T-11 asserts (a) backup timer writes only under `BACKUP_ROOT`, (b) drill restore from
-  that path reproduces digests, (c) OneDrive status reports the items synced (NFR-22 criteria).
-- **Alternatives:** second physical disk only — demoted to *optional* local redundancy [E: previous
-  `/home/steven/backups` practice]; ruled out as canonical because it shares the host's fate.
-  Borg/restic encryption layers — deferred, [proposal] M2: OneDrive versioning covers the near-term
-  risk, add once volumes justify the key-management cost.
+### 6.9 Host backup job  [thin host timer, in-repo `deploy/backup/` [P]; not a compose service — lifecycle class X, §6.10]
 
----
+**Cadence:** nightly 03:30 CST (host timer; **Windows host** — WSL itself may sleep when the
+machine is off), plus optional manual trigger. **Source:** `/home/steven/HE-toolstack/heat-data`
+(authoritative, ext4 [V]). **Destination (canonical, ruling D-14):**
+`/mnt/c/Users/steven/OneDrive/Backup/HE-toolstack/` (`$ROOT`), WSL-visible at the same path [V].
+Solver I/O does **not** move to `/mnt/c` (WSL-mount metadata overhead, FM-9): the backup reads
+the ext4 tree, it never relocates it. **Status: designed, never run — the stack is unbuilt.**
+
+**Application-consistency property (normative):** no solver artifact file is read for backup
+while its producing job is still writing it. This holds **because the run refuses to copy while
+the stack is not quiet (§6.9.1)** — not because any read pattern is inherently race-safe. A tree
+copied with active solver output must never be called application-consistent.
+
+**§6.9.1 Active-job policy (r5 — one coherent choice; replaces the r2 "refuse by default +
+`--allow-active` drill override", which contradicted §6.9's own refusal and is WITHDRAWN).**
+Chosen for M0: **quiesce-and-wait; no live-state override exists** (`--allow-active` is removed
+from the design, not gated). Rationale: the safe alternative — a snapshot mechanism that
+captures active job state + artifacts consistently — would have to be *proven*, and none exists
+for this workload on this filesystem pair (`cp`-ing a live tree is the torn-copy case the review
+named). Behavior matrix:
+- **Job already running at backup start** → run aborts **before copying anything** (exit 2, no
+  candidate, nothing published). A skipped night is loud: `backup_stale` (§6.9.4, R-8).
+- **Job submitted during the copy window** → paused: the timer installs
+  `heat-data/.backup-pause` **before** the active-job check; the toolserver answers new
+  submissions with 409 `backup_paused` while the file exists (§8.7 row added).
+- **Job starting after the initial active-job check** → impossible under policy (pause precedes
+  check); if observed anyway (hand-submitted violation), the re-check after snapshot aborts the
+  run — nothing published.
+- **Crash during the backup** → a `.candidate-*` dir, or a dated dir, **without** a valid
+  `DONE.json` is by definition not a backup: next run quarantines or resumes it (§6.9.2 step 8);
+  restore selection never sees a partial tree as complete.
+- **Incomplete run restored from backup** → cannot happen for *included* runs: every run dir in
+  the manifest was complete when copied (quiet stack). A restore to an instant *before* a run
+  completed leaves that run `active`/`queued` at the backup point → FR-37 reconciliation at
+  restart handles it (§9.6 step 3), which is the designed behavior, not corruption.
+- **Operational tradeoff (stated):** submissions see a minutes-long `409 backup_paused` window;
+  on a busy box a night may be **skipped entirely** until a quiet window opens — `backup_stale`
+  is the compensator, cadence grace absorbs one miss. Accepted for M0 in exchange for never
+  copying a torn artifact. Revisit only if skip rate becomes material, and then only with a
+  *proven* snapshot mechanism, not with a renamed override flag.
+
+**§6.9.2 Physical data path (r5 correction).** The r2 step "stage on ext4 → **atomic rename**
+into final dir under `BACKUP_ROOT`" was a category error: ext4 → `/mnt/c` is **not** a
+same-filesystem rename — POSIX rename cannot span the mount (and the r1 wording "atomic rename
+into `BACKUP_ROOT`" is retracted everywhere). Valid copy-and-publish protocol:
+1. **Quiesce gate (§6.9.1):** flock `heat-data/.locks/backup.lock` (§8.8 machinery, single
+   writer) → write `.backup-pause` → poll stack status (loopback, host-reachable): active
+   tickets + solver procs == **0** → re-check after step 2; any nonzero → abort per §6.9.1.
+2. **Application-consistent snapshot on the ext4 working filesystem:** `sqlite3 .backup`
+   online-backup API for `queue.db`/`registry.db` (WAL folded — a plain `cp` of a live DB is
+   explicitly rejected; WAL checkpoint state is inside the snapshot); `cp -a` ledger + tickets
+   trees (quiet under step 1); write `.snapshot.json` (included paths + sizes + source stat).
+   ext4 staging holds **only** these small consistent files; the large artifact tree is read
+   direct from its authoritative location (frozen, per step 1) — one local copy per byte.
+3. **Validate the source snapshot:** `PRAGMA integrity_check` + `quick_check` on each snapshot
+   DB; ledger parses to its final line; sha256 per file over the **included set** →
+   `manifest.src`. Under the quiesce gate the source cannot change mid-copy (the r2 §6.9
+   step-4 "source moved during copy" self-race is eliminated by policy, and any violation
+   still trips step 5).
+4. **Copy the snapshot to a temporary destination directory under the canonical root:**
+   `$ROOT/.candidate-<runid>/`. Transport = **robocopy from the Windows host** (native NTFS +
+   9P read path, bulk-copy proven on this box [E]; `/E /ZB /MT:8 /R:3 /W:5 /LOG+:<run log>`,
+   driven by a path-prefixed file list generated at step 3). Exit codes < 8 = *local write
+   complete* (level **L2**, §6.9.4) — nothing more. In-container `mc`/`rsync` are not the
+   transport.
+5. **Verify all destination files and digests:** re-hash every file in the candidate against
+   `manifest.src` (size + sha256; `.copied` progress markers make re-runs skip only
+   checksum-verified files — size-only is never sufficient). Any mismatch → quarantine (§8 of
+   this list), exit 1.
+6. **Publish a completion marker ONLY after destination verification:** write `DONE.json`
+   inside the candidate (`runid`, manifest digest, per-file digests, engine/git HEAD,
+   `quiesce: {active_jobs_at_check: 0, pause_installed: true, checked_at}`, timestamps). Re-hash
+   manifest + DONE.json lines (catches last-write races). Local sync-client quiet via
+   `robocopy /MON:1 /MOT:1` — still **not** upload proof (§6.9.4).
+7. **Publish = rename `.candidate-<runid>` → `$ROOT/heat-data/<yyyymmdd>.<runid>/` — a rename
+   **within the NTFS volume** (valid, same-volume); then a final `/MON:1 /MOT:1` quiet pass.
+   No consumer ever observes a half-named tree.
+8. **Interrupted transfer — detection, resume, retention (normative):** what is detected: a
+   `.candidate-*` dir, or a dated dir, **without** valid `DONE.json` → not a backup. Handling:
+   resume per `.copied`/digest markers (idempotent) or delete-and-restart; quarantine =
+   `$ROOT/.quarantine/<runid>.<reason>/`, retained **14 d** then timer-deleted with an R-8 log
+   line. Incomplete trees are never restore sources (§9.6 step 1).
+9. **Restore reads the canonical destination** (`$ROOT/heat-data/<date>.<runid>/`), never the
+   live source tree (§9.6).
+The legacy second-disk copy (`/home/steven/backups` [E]) stays optional local redundancy, never
+a restore source.
+
+**§6.9.3 MinIO data: version-history **export** (r5 — the `mc mirror` version-history claim is
+WITHDRAWN).** Verified against vendor behavior: `mc mirror` (with or without `--overwrite`/
+`--remove`) replicates **current object data only** — it copies **no** non-current versions and
+**no** bucket versioning configuration; the r2 line that server-side versioning was
+"retained for version-aware restore" via mirrored staging preserved **zero** history, so
+version-aware restore from that backup was impossible [research 2026-11-16; rclone maintainer
+confirms mirror-class tools read versions but cannot recreate them at a destination].
+Resolution — export history **as data**, and state exactly what it buys:
+- **Mechanism (proposal, runtime-verify T-22):** backup exports the versioned bucket with
+  `rclone` source-remote `--s3-versions` (every historical version lands as a distinct payload
+  file with a version-suffixed name) **plus** a **version manifest** (`mc ls --versions --json`
+  dump: VersionId, key, size, etag, mtime per version) written into the backup tree. Restore
+  of a *specific* version = select from manifest, re-upload that payload as a new object.
+- **Preserved:** the content of every version (recoverable bytes) + the complete version
+  register. **Lost vs native:** no `?versionId=` read-back, no in-place un-delete, no restored
+  versioning semantics at the recovery site (re-upload creates fresh versions).
+- **Honest bound (do not read past it):** until T-22 runs, backup version coverage is
+  *specified, not proven*. If T-22 fails with the deployed rclone/MinIO versions, **OQ-8**
+  fires: fallback = latest-version-only backup + **explicit NFR-17 relaxation** — what would be
+  lost is restorability of *superseded* promoted objects after bucket loss (in-app versioning
+  still protects runtime hot-promotions; promoted artifacts keep their git-side copy §9.3).
+  The design does **not** silently weaken NFR-17 and does **not** claim historical versions are
+  backed up while they are not.
+- `mc mirror` is removed from the backup design entirely (it never earned its place: the
+  versioning rationale was the only one it had).
+
+**§6.9.4 OneDrive synchronization proof — five levels, honestly separated (r5: the r2
+"`File-Attributes` API / `attrib -r`" placeholder read-back is WITHDRAWN; a local `DONE.json`
+is NOT upload proof).**
+- **L1** file exists in the WSL-visible directory — proves nothing.
+- **L2** copied to destination + digest-verified (§6.9.2 steps 4–5). `DONE.json` is **L2
+  evidence only** — it records that the *local* backup completed.
+- **L3** the OneDrive client has *processed* the file locally. The `attrib` placeholder/offline
+  bits are **negative-only** evidence: set ⇒ definitely not uploaded; cleared ⇒ **still no
+  proof** of completion.
+- **L4** upload to the remote OneDrive service completed.
+- **L5** the remote copy was read back and verified (content/digest from the service).
+- **Real mechanisms available in THIS host environment (verified inventory):** for L4/L5 —
+  **(a) manual web read-back**: operator opens the OneDrive web folder, confirms `DONE.json` +
+  manifest, signs `drills/onedrive-readback.log` (L5-grade when performed); **(b) Microsoft
+  Graph API** read-back — requires an app registration + token that **do not exist in this
+  design today** → **OQ-9**. Robocopy `/MON:1 /MOT:1` quiet waits prove only that the local
+  sync client stopped touching the tree (between L2 and L3 — below L4, stated as such). No
+  supported CLI/file-attribute signal reaches L4/L5 without credentials.
+- **Consequence, stated plainly (reviewer C):** **no reliable automated completion signal
+  exists today → the RPO is NOT guaranteed off-host.** §9.4's RPO is a **local-completion RPO**
+  (last `DONE.json` + git on the host disk). Durability beyond the host disk is **unproven**
+  per OQ-9 as **RULED 2026-11-16: operator accepted Option A — the manual web read-back ritual is the
+  standing mechanism; Graph (Option B) may be commissioned later.** The consequence statement above stands unchanged.
+- `backup_stale` is two-part (§11.8 R-8): (i) no fresh `DONE.json` under `$ROOT` within cadence
+  + grace → alarm (L2-level); (ii) no L5 evidence newer than **7 d** → operator reminder.
+
+### 6.10 Container lifecycle classes, shutdown, and the janitor  [FINDING-02, GitHub #3 — added 2026-11-15; r9 ownership rewrite]
+- **Canonical lifecycle classes (normative; ADR-D-01 A1). Exactly one lifecycle owner per
+  container; every stack-owned container carries the canonical ownership label `he-stack=1`:**
+  - **Class C — compose services (core 5):** `toolserver`, `workflow-engine`, `spawn-sidecar`
+    (D-16 ACCEPTED 2026-11-16 — sole `docker.sock` holder; §6.2b), `minio`,
+    `he-scratch-keeper`. Profile-conditional member: `gpu-probe` (added only by the `gpu`
+    compose profile, §11.3; not part of CPU-only M0 acceptance). The Hermes **agent container
+    is NOT class C** — it is a host-run external (§11.9), attached to `he-agent` as an
+    external network member. Compose owns class C create/start/stop/remove; `docker compose
+    down` removes **exactly and only** class C.
+  - **Class J — one-shot job containers:** created **by the engine** *through* the
+    spawn-sidecar API (creator = engine, via the sidecar's socket; §6.2b) with labels
+    `he-stack=1`, `he-run=<id>`, `he-job-id=<id>`. Compose never knows them. Registry owner =
+    the engine (every spawn writes a registry row; exit recorded to registry). Cleanup policy
+    = the **janitor** (duties and owners enumerated below): exited containers kept ≤15 min
+    [P] for log-tail capture, then reaped.
+  - **Class X — declared host-level infrastructure exceptions (§6.9, §11.9):** the backup
+    **systemd timer** on the host. Never a container at all, never a compose resource, never
+    a stack dependency; its absence degrades backups, not execution. **Class X is excluded
+    from every zero-container stack assertion** (it never appears in `docker ps`).
+- **The janitor — three duties, three owners (r9: no duty depends on a component that is
+  already stopped):**
+  1. **Steady-state reap:** the sidecar's own internal janitor timer reaps expired exited
+     class-J containers (label-matched) — engine-independent, runs while the stack is up.
+  2. **Startup sweep:** the sidecar sweeps label `he-stack=1` remnants on its own boot —
+     covers engine-crash and daemon-restart abandonment without the engine.
+  3. **`make down` final sweep:** executed **host-side by the `make down` recipe** (step 5
+     below) *before* class C is brought down further — completes even when the engine and
+     sidecar are dead or dying; implementation: `docker rm -f` over
+     `docker ps -aq --filter label=he-stack=1` minus live class-C ids.
+  Engine-boot **reconciliation** (§8.6) is a distinct duty of the engine: registry rows vs
+  labeled containers (container-without-row → ask sidecar to reap; row-running-without-
+  container → mark `interrupted` → requeue via idempotent step re-entry, FR-38). Invariant
+  NFR-24 makes "container exists that no owner claims" a detectable defect, not a leak.
+- **`make down` — the COMPLETE stack shutdown (normative; diagram D9). It is a host-side
+  recipe (Makefile), not an engine-internal act — the engine never runs compose commands:**
+  1. **Stop new job claims:** `docker compose stop -t <grace> workflow-engine` sends SIGTERM;
+     the engine's handler stops claiming from the queue.
+  2. **Gracefully terminate active class-J jobs:** for each running job the engine calls the
+     sidecar `POST /v1/runs/{id}/kill` (SIGTERM); waits ≤ `TS_SHUTDOWN_GRACE_SECONDS=60` [P],
+     then re-issues kill.
+  3. **Record interruption/termination state:** engine writes `interrupted`/`killed` to the
+     registry **write-ahead, before it exits** (step 1's stop flag keeps the engine alive
+     through steps 2–3 — no step requires an already-stopped engine).
+  4. **Stop class C via Compose:** `docker compose down` removes the compose-managed
+     services (sidecar included, after the engine has drained).
+  5. **Reap remaining stack-owned class-J containers:** janitor duty 3, host-side,
+     engine-independent and sidecar-independent.
+  6. **Verify:** `docker ps -a --filter label=he-stack=1 -q` = **0 rows** (classes C∪J, incl.
+     job/one-shot orphans) **and** `docker compose ps -a` empty. **Class X is explicitly out
+     of scope of this assertion** — the host backup timer is not a stack container.
+  The bare `docker compose down` (step 4 alone) removes **only class C** compose-managed
+  resources — never complete stack shutdown; it remains an operator escape hatch whose class-J residue is
+  healed by janitor duties 1–2 + reconcile-on-start at next `make up`. `make down` is the
+  sole acceptance target (T-13/NFR-01/NFR-10).
+- **Recovery from daemon restart:** boot sequence runs reconciliation before serving.
+
+### D9 — Lifecycle & shutdown sequence (FINDING-02; r9 redrawn to the D-16 boundary)
+```mermaid
+sequenceDiagram
+    participant MD as make down (host CLI)
+    participant WE as workflow-engine
+    participant SC as spawn-sidecar (sole socket)
+    participant JB as job containers (class J)
+    participant CP as compose (class C)
+    MD->>WE: step 1 compose stop -t grace<br/>SIGTERM: stop claiming
+    WE->>SC: step 2 POST /v1/runs/id kill<br/>(engine has NO socket, D-16)
+    SC->>JB: SIGTERM running jobs
+    JB-->>WE: exit codes via status/logs API
+    WE->>WE: step 3 record interrupted/killed<br/>write-ahead BEFORE exit
+    WE->>WE: engine exits (drained)
+    MD->>CP: step 4 docker compose down<br/>(removes class C only)
+    MD->>MD: step 5 host-side janitor sweep<br/>rm label he-stack=1 remnants<br/>(works with engine AND sidecar dead)
+    Note over MD: step 6 assert: docker ps -a filtered by label he-stack=1 returns zero<br/>covers class C and J — class X host backup timer is not a container
+```
+*Diagram 9 — shutdown with running jobs (r9). Choreography is the host `make down` recipe;
+no step depends on an already-stopped engine, and jobs are killed through the sidecar
+because the engine holds no Docker socket (D-16 accepted 2026-11-16). The backup timer
+(class X) is host infrastructure outside this flow (D-01 A1) and outside the zero-container
+assertion.*
 
 ## 7. API and Interface Specifications
 
 ### 7.1 Conventions
-Base `http://127.0.0.1:8100`; JSON only; auth: **none by design in initial release — the
-loopback bind *is* the control** (NFR-07; deferred auth F-1 documented there, never implied
-present). All timestamps RFC 3339 UTC. All list endpoints cursor-paginated (`?cursor=&limit=`,
+- **Canonical client URLs (D-15 rev):** agent/`he` → `http://toolserver:8100` (service DNS on
+  the dedicated `he-agent` network; `HE_API_BASE` override); host operator → `make health`
+  (one-shot `docker run --rm --network <project>_he-agent` probe — the host cannot route
+  dedicated-net IPs directly [V]). Acceptance connect test runs **from inside the agent
+  container** (§11.5 — host-side curl proves nothing, F1), and the negative half runs from a
+  NON-member container (T-15: service name unresolvable, no gateway path — refusal expected).
+Canonical base = §7.1 client URLs above (`http://toolserver:8100`); JSON only; auth: **none by
+design in initial release — `he-agent` network *membership* is the control** (NFR-07 r7: not the
+bind — a bind address is exposure control, never authN/Z; deferred auth F-1 documented there,
+never implied present). All timestamps RFC 3339 UTC. All list endpoints cursor-paginated (`?cursor=&limit=`,
 default 50). Errors (§7.3) on every endpoint; unknown fields rejected (`422`) so contract
 drift is loud. Idempotency: mutation endpoints accept `Idempotency-Key` header (client-
 generated uuid4; server keeps 24 h map; replays return stored response + `Idempotent-Replay:
@@ -580,8 +937,10 @@ are pointers, not bytes — §7.4); client default 10 s + 3 retries w/ backoff o
 ### 7.2 Endpoints [P — proposed contract; T-08 fixtures are the normative artifact]
 | Method | Path | Purpose | Auth | Idem | Success | Notable errors |
 |--------|------|---------|------|------|---------|----------------|
-| GET | `/healthz` | liveness (toolserver/healthz mirrors engine/minio reach) | — | — | 200 | 503 deps down |
-| POST | `/jobs` | submit tool job `{tool, params, run_id?, vram_ceiling?, priority}` | loopback | ✔ | 201 `{job_id, queue_pos}` | 422 unknown tool/digest not in MANIFEST (`409 digest_unpinned`); 413 body>1 MiB; 429 queue-full (bound 200 [P]) |
+| GET | `/healthz` | **liveness only** — process alive + serving; dependency state NEVER reflected here or in its code (NFR-23) | — | — | 200 `"alive"` | 503 only when the process itself cannot serve |
+| GET | `/readyz` | **readiness for the operation requested**: toolserver requires DB+engine; engine requires DB+sidecar; **MinIO is NOT required for solver execution** (D-17) | loopback | — | 200 `{"ready":true}` | 503 `{"ready":false,"missing":[…]}` when a REQUIRED dep is down (never for MinIO) |
+| GET | `/deps` | **detailed dependency status** (200 whenever the process can answer; dep state lives in the body — canonical map below) | loopback | — | 200 `{deps:{engine,minio,sidecar,docker,db}, promotion_backlog:int}` | 503 only if the responder itself is down |
+| POST | `/jobs` | submit tool job `{tool, params, run_id?, vram_ceiling?, priority}` | loopback | ✔ | 201 `{job_id, queue_pos}` | 422 unknown tool/digest not in MANIFEST (`409 digest_unpinned`); 413 body>1 MiB; 429 queue-full (bound 200 [P]); 409 `backup_paused` during the §6.9.1 pause window |
 | GET | `/jobs/{id}` | status `{state, started?, finished?, exit?, gate?}` | loopback | — | 200 | 404 |
 | GET | `/jobs?state=&tool=&cursor=` | list/filter | loopback | — | 200 | — |
 | POST | `/jobs/{id}/cancel` | request cancel (SIGTERM→grace→kill 30 s [P]) | loopback | ✔ | 202 | 409 already terminal |
@@ -591,7 +950,18 @@ are pointers, not bytes — §7.4); client default 10 s + 3 retries w/ backoff o
 | POST | `/gate/run` | run gate for run `{run_id, checks?}` → exec §6.3 path | loopback | ✔ | 201 → job_id (async) | 409 run not in gateable state |
 | GET | `/candidates` / `/candidates/{run_id}` | registry queries + comparison `{metrics, gate, evidence[]}` | loopback | — | 200 | 404 |
 | GET | `/workflow/{flow}` | `workflows/<flow>/state.json` mirror (agent resume aid) | loopback | — | 200 | 404 |
-Example `POST /jobs`: req `{"tool":"gmsh","params":{"geo":"runs/r7/geom.step","hmax":0.4},"run_id":"r7"}` → 201 `{"job_id":"j-01H…","state":"queued","queue_pos":2}`.
+Example `POST /jobs`: req `{"tool":"gmsh","params":{"geo":"runs/r7/geom.step","hmax":0.4},"run_id":"r7"}` → **201 `{"job_id":"j-01H…","queue_pos":2}` — the normative body is EXACTLY `{job_id, queue_pos}` (FR-01/ADR-D-18); no `state` field (read it via `GET /jobs/{id}`). Idempotent replay returns the SAME body + SAME status + `Idempotent-Replay: true` (§7.1).
+
+**Health contract — canonical responses for the six scenarios** (NFR-23; T-08 fixtures; `/health` retired r10 — `/deps` is the component map):
+
+| Scenario | `/healthz` | `/readyz` | `/deps` body (engine view) |
+|----------|-----------|-----------|---------------------------|
+| 1 all deps healthy | 200 | 200 | `{engine:ok, minio:ok, sidecar:ok, docker:via-sidecar, db:ok}`, `promotion_backlog:0` |
+| 2 MinIO unavailable | 200 | **200 (solver execution NOT gated — D-17)** | `{minio:down, …}`, `promotion_backlog:n` |
+| 3 workflow engine unavailable (from toolserver) | 200 | **503** `{missing:[engine]}` | toolserver `/deps`: `{engine:down}` |
+| 4 toolserver unavailable | connection refused (agent-side retry, FR-35) | — | — |
+| 5 promotion backlog nonzero | 200 | 200 | `{minio:ok}`, `promotion_backlog:>0` (drain lag) |
+| 6 solver runs, promotion delayed | 200 | 200 | `{minio:ok|down}`, backlog>0; affected runs show `degraded-evidence` (§8.2) — **never `failed`** |
 
 ### 7.3 Error envelope (single shape everywhere)
 `{"error":{"code":"digest_unpinned","message":"image sha256:aa.. not in MANIFEST rev 0ed664b","details":{…},"trace_id":"t-…"}}` + matching HTTP class (4xx caller, 5xx stack). `trace_id` appears in server JSON logs (NFR-13 correlation).
@@ -602,15 +972,35 @@ host path) or presigned-free in-net S3 for tool containers. Keeps the HTTP edge 
 and the p95 latency budget honest (NFR-04).
 
 ### 7.5 Component-to-component interfaces
-- **toolserver → engine:** same SQLite WAL (insert queue rows; engine = sole RW updater) —
-  deliberate *no-HTTP* hop (one less moving part; D-08 colocation). Consistency: `BEGIN
-  IMMEDIATE` inserts; busy_timeout 5 s. Marked [P]; if review objects to shared-DB coupling,
-  the alternative (engine internal HTTP) is tracked as OQ-6, contract would then mirror §7.2
-  subset.
+- **toolserver → engine (r3 — submissions inbox; resolves the write-ownership contradiction):**
+  the r2 text here contradicted §6.7/§8.4 by giving the toolserver an
+  `UPDATE queue SET state='claimed'…` operation — **that operation is deleted from this
+  design** (it made two processes writers of one table while §6.7/§8.4 claimed per-table
+  single-writer). Adopted model = reviewer option 2: an explicit **inbox table**.
+  `submissions(id, kind ∈ {submit,cancel,retry}, payload_json, idempotency_key UNIQUE,
+  created_at, consumed_at NULL)`. The toolserver's **only write anywhere in the engine DB
+  is `INSERT INTO submissions`** (submit/cancel/retry endpoints all land there; `POST
+  /jobs` 400-checks schema first). The engine consumes: ONE `BEGIN IMMEDIATE`
+  transaction — dedup `idempotency_key` against `idempotency_keys` (authoritative dedup
+  happens HERE, engine-owned; the toolserver pre-insert check is a best-effort read, never
+  a write) → `INSERT INTO queue` (+immutable job_spec snapshot) → `DELETE FROM submissions
+  WHERE id=?` (+ `UPDATE idempotency_keys…`) → commit; affected-rows checked;
+  `busy_timeout=5000 ms` + ≤3 bounded retries; persistent busy ⇒ honest `503`
+  (busy_timeout buys wait-time, **not fairness** — WAL admits one committer db-wide,
+  §8.4). **Transaction boundaries / crash windows:** inserted-not-yet-consumed ⇒ row
+  visible, engine retries (idempotent via key); consumed ⇒ queue row exists in the SAME
+  commit (half-consumed impossible); a queued job never double-executes because the sole
+  dispatcher transitions `queued→admitted` under `BEGIN IMMEDIATE` + affected-rows==1
+  (§8.2 guards). Reads (`GET /jobs/{id}`, queue, ledger, gate) = read-only SQL
+  connections (WAL readers don't block the committer). Engine owns migrations
+  (`schema_migrations`, additive-only pre-M1 [P]) + weekly `PRAGMA integrity_check`
+  logged. Rejected alternatives (shared-table dual-writer = the r2 contradiction;
+  engine-internal enqueue HTTP = one hop removed but engine takes the public-API surface)
+  stay documented in OQ-6/ADR-D-08 for the reviewer.
 - **engine → tool containers:** `docker run` equivalents from `job_types` rows: image by
   digest, `--network none`, binds `heat-data/runs/<id>/work`, env allowlist, cpu/mem
   limits, GPU device + nvidia runtime only when class enabled (FR-18). Exit code + captured
-  stdout/stderr tail (64 KiB) become artifact rows. **spawn channel = OQ-5.**
+  stdout/stderr tail (64 KiB) become artifact rows. **spawn channel = spawn-sidecar API (D-16 ACCEPTED 2026-11-16).**
 - **engine → MinIO:** boto3 (S3 API, in-net `minio:9000`), put+versioning, creds env-only.
 - **engine → git:** `git -c user…commit` + `push` on heat-data mirror; remote failure = local
   queue + retry each loop tick (A13).
@@ -628,8 +1018,9 @@ and the p95 latency budget honest (NFR-04).
 `workflows/` files, tickets, and this ledger **are** the operational state (D-02: "workflow
 files = state"). Rules: (1) a ticket is *open* only if its file exists in
 `workflows/tickets/`; (2) progress claims are `claimed: <session>, <ISO time>` lines written
-**before** work (single-writer discipline — if two sessions see the same claim, the earlier
-timestamp wins, later yields); (3) completion = a ≤3-line done-check (what changed, how
+**before** work, and **only while holding the per-ticket flock (§8.8)** — mutual exclusion
+is the lock, not the timestamp (r3: the earlier "earlier timestamp wins" rule was prose
+convention with no enforcing mechanism); (3) completion = a ≤3-line done-check (what changed, how
 verified, cleanup attestation) + ledger row + commit (NFR-12 makes the attestation
 mechanical via CI lint); (4) machine state (queue, registry, run state.json) lives in
 heat-data; `workflows/` lives in the repo and is *human/agent-legible* — a session with zero
@@ -638,21 +1029,33 @@ memory must be able to answer "what is in flight, what is next, what is blocked"
 
 ```mermaid
 stateDiagram-v2
-    [*] --> open: ticket file created (claimed line = single-writer)
-    open --> in_progress: claimed: session, ts (written BEFORE work)
+    [*] --> open: ticket file created
+    open --> in_progress: flock acquired + claimed line under lock (§8.8)
     in_progress --> in_progress: progress commits (ledger rows)
     in_progress --> blocked: blocker recorded in ticket file (why + unblock condition)
     blocked --> in_progress: unblocked (evidence appended)
     in_progress --> done: done-check <=3 lines + verification refs + cleanup attestation
     done --> [*]: commit + ledger row; ticket file remains (history, not state)
 ```
-*Diagram 5 — ticket lifecycle (the human-visible half of orchestration; D-02 state law).*
+*Diagram 5 — ticket lifecycle (the human-visible half of orchestration; D-02 state law; claim transitions enforced by the §8.8 flock).*
 
-### 8.2 Job/run state machines (machine half; SQLite, single writer = engine)
+> **Contract boundary (v1.1, FINDING-07 — one canonical contract):** HTTP status codes and
+> error bodies are canonized **only** in §7.2 (201 = FR-01 as revised in REQUIREMENTS v1.2;
+> the 202 vs 201 conflict is closed). Requirement FR-02's state list is the *informative
+> subset*; §8.2's machine is the normative superset (REQUIREMENTS v1.2 states this). Layer
+> boundaries: **workflow/ticket** states (§8.1/§8.1-law, agent-visible, owner = engine
+> workflow loop) ≠ **job** states (§8.2, owner = engine dispatcher, trigger = worker exit) ≠
+> **run** phases (`solving → physics_complete → promotion_pending → promoted | promotion_failed`;
+> physics completion is terminal-for-physics and NEVER waits on evidence promotion — promotion
+> is async with retry backlog in `promotion_queue`, FINDING-06 semantics). Every §8.2
+> transition row carries its owner + trigger; acceptance = T-02/T-12 assert exactly these
+> tables (the single source of truth).
+
+### 8.2 Job/run state machines (machine half; SQLite; **r3 ownership:** engine owns ALL queue writes — toolserver enqueues via the `submissions` inbox (§7.5/§8.4b); ADR-D-08 A1 ACCEPTED — operator ruling 2026-11-16, OQ-6 CLOSED)
 Job: `queued → admitted → running → {succeeded | failed | cancelled}`, plus
 `degraded-evidence` (physics done, evidence step blocked — §6.5) and `stale-lease` (crash
 recovery re-queues, §8.6). Run: `created → active → gate_pending → {succeeded | failed} →
-promoted`; terminal states immutable. **Transition guards (DB triggers):** →`succeeded`
+promoted`; terminal states immutable. **Canonical evidence ladder (r10 — the four states named apart, never conflated):** (1) *solver execution completed* (worker exit 0) ≠ (2) *physics gate passed* (verdict, owner: engine gate step) ≠ (3) *evidence promotion pending* (`promotion_pending`/`degraded-evidence`, backlog row exists) ≠ (4) *evidence promoted* (`promoted`, versionId in registry). A run at (1)-(3) with physics green is **successful-with-pending-evidence, never a solver failure** (D-17; runs carry `evidence_available=false` while pending). **Transition guards (DB triggers):** →`succeeded`
 requires gate report with matching digests (§6.7); GPU-class jobs cannot leave `queued`
 while class flag off (FR-18); `admitted` commits the VRAM reservation atomically.
 
@@ -673,13 +1076,31 @@ Step exec is runner-driven (§6.2): each arrow is one job submission; state.json
 records step boundaries (D-05 artifacts→state→ledger order visible in file timestamps +
 `journal/` sub-record).
 
-### 8.4 Single-writer points
-SQLite WAL: engine = RW, toolserver = insert-only (busy_timeout). `workflows/`: claim-before-
+### 8.4 Single-writer points (per-table; F4 disambiguation)
+SQLite WAL: one committer db-wide; exact operation-level ownership in the §8.4b table (r3) — toolserver write path = INSERT on `submissions` only, engine = everything else (busy_timeout, bounded retry). `workflows/`: claim-before-
 work convention + git merges as backstop. heat-data run dirs: only the job container holds
 its run-dir RW bind during `running`; promote worker is sole MinIO writer; ledger: engine
 sole appender (agent edits go through tickets, not the ledger). Git: engine pushes; agent
 repo edits and engine ledger commits share the remote via fetch-rebase-retry loop (push
 contention = transient, retried; [P], reviewed at M0).
+
+#### 8.4b — SQLite operation-level write ownership (normative; r3)
+
+WAL admits **one
+committer db-wide at a time**; "ownership" below is an application *convention* that makes
+contention predictable — the DB does not enforce per-table writers, and no fairness is
+promised by `busy_timeout`.
+
+| Table | Writer process(es) | Operations | Transaction mode |
+|-------|--------------------|-----------|------------------|
+| `submissions` | toolserver: INSERT only · engine: DELETE on consume | submit/cancel/retry enqueue; consume | toolserver: 1-stmt autocommit; engine: BEGIN IMMEDIATE (with queue insert) |
+| `queue` | **engine only** (toolserver = read-only) | INSERT (from consume), `queued→admitted→running→terminal` updates | BEGIN IMMEDIATE + affected-rows==1 (§8.2 guards) |
+| `idempotency_keys` | **engine only** (authoritative dedup at consume) | INSERT/lookup inside consume txn | BEGIN IMMEDIATE |
+| `runs`, `job_types`, `gate_results`, `evidence_links`, `candidates`, `promotion_queue`, `reconcile_log`, `schema_migrations` | **engine only** | per-subsystem (§6) | BEGIN IMMEDIATE where multi-row |
+
+Read path: toolserver opens all of the above **read-only** (WAL readers coexist with the
+committer). Duplicate-job-execution prevention = single dispatcher + §8.2 conditional
+transitions (an executor that doesn't win the affected-rows check never runs the job).
 
 ### 8.5 Idempotency and replay
 Every mutation carries an idempotency key (§7.1); step exec re-check (FR-38): a step re-run
@@ -703,6 +1124,61 @@ as-is; runner step-exec becomes framework activities; `workflows/` state law unc
 (files stay authoritative view). **Cost estimate:** ~1 service + ops overhead on a box
 already running 3 stacks [V] — unjustified today; revisit at M2 review with T-07/T-02 stats
 as evidence.
+
+### 8.8 Concurrent agent sessions and ticket claims  [review §5.1; **r3 rewrite: flock(2) held lock replaces the r2 O_EXCL/rename design** — §5.4b's "no lock manager" row still holds: a per-ticket advisory lock is a filesystem primitive, not a daemon]
+Multiple `he` clients are supported **at the API level**. Ticket-level concurrency is an
+**agent-protocol** matter and is mechanized here. **Why r2 was wrong (accepted finding):**
+atomic rename — and equally `O_CREAT|O_EXCL` creation — are *point* operations; neither is a
+lock. Nothing serialized a claimant's read→check→modify window (two sessions could both pass
+the "no live claim" check and both write replacements, last writer wins), and the r2
+supersede's rename-then-recreate carried its own unlink/recreate race. The r2 text also
+mislabelled these as "CAS" — retracted: an operation is only a CAS if applied under mutual
+exclusion. The mechanism now:
+- **flock protocol (normative):**
+  1. **Lock:** `open("workflows/tickets/.locks/<id>.lock", O_CREAT, 0o644)` then
+     `flock(fd, LOCK_EX | LOCK_NB)`, retrying with 100 ms backoff up to
+     `HE_CLAIM_WAIT_MAX` (default 5 s [P]). **Creating the file is not the arbiter;
+     acquiring the lock is.** Timeout while a holder exists ⇒ `409 already_claimed`; a loser
+     never reads or modifies the ticket.
+  2. **Critical section (all under the held lock):** read ticket → classify (fresh /
+     claimed-live / claimed-stale / done) → append the `claimed:` line to the ticket
+     (write→fsync) → append the ledger claim event → write claim payload
+     `{session_id, pid, claimed_at, heartbeat_at, status}` → release. No ticket read or
+     mutation ever happens outside the lock (payload is informational; flock arbitrates — so
+     a crash mid-section is recoverable, not corrupting).
+  3. **Lock-file location/permissions:** `workflows/tickets/.locks/` (same ext4 owner/D-05
+     root, dir 0755 / file 0644, single HE user [A2]).
+  4. **Process-crash behavior:** flock is bound to the fd and **released by the kernel on
+     process death** (any exit or signal). No unlink protocol, no stale-lock sweep, no
+     delete/recreate race — a leftover lock *file* with a dead holder is simply unlocked.
+  5. **Heartbeat/expiry:** holder rewrites `heartbeat_at` every 60 s [P,
+     `HE_HEARTBEAT_SEC`]; a claim is *stale* when `heartbeat_at` older than
+     `HE_CLAIM_STALE_MIN` (default 30 min [P]) **and** no holder currently has the lock
+     (detection = `LOCK_EX|LOCK_NB` succeeds, then re-verify staleness inside). A hung-but-
+     alive holder keeps the lock **by design** (mutual exclusion excludes zombies too); ops
+     path = deliberate `kill` of the pid named in the payload, after which the kernel
+     releases and supersede proceeds.
+  6. **Stale-claim supersede, under the held lock:** acquire → re-verify staleness (two
+     superseders cannot both be inside; the flock loser waits or times out with 409) →
+     ledger note `superseded: <old session> @ <ts>` → write own claim → release. **No
+     rename acts as arbiter anywhere in this design.**
+  7. **Completion:** under the lock: done-check lines + rename ticket → `done/` (rename is
+     the atomic *replace* of ticket state, not the arbiter), ledger append, payload
+     `status=done`, release. Crash between rename and release ⇒ ticket done + lock
+     free — consistent (done/ is truth, §8.1).
+  8. **Filesystem/host assumptions:** one host [A2], `workflows/` on **local ext4** — flock
+     has no valid semantics over NFS/9p; preflight **asserts** this (`stat -f`) and fails
+     closed if the repo root is ever remoted. Design requirement to verify at M0, not an
+     asserted fact.
+  9. **Bounded wait:** lock acquisition is bounded (`HE_CLAIM_WAIT_MAX`); exhaustion =
+     clean `409` + hint naming holder pid + heartbeat age — never a hang, never a silent
+     proceed.
+- **What is NOT promised:** no cross-session coordination of *work content* (git + human
+  reconcile), no priority fairness, no multi-operator RBAC (§10.2), no cross-host claims
+  (single host, [A2]).
+- **Concurrency tests:** claim race = **T-20** (≥2 independent processes, fresh ticket,
+  exactly one winner; 10× repetition), supersede + crash + retry = **T-21**, duplicate-
+  execution/crash-windows = **T-23** (REQ §4). [P — designed, not run]
 
 ---
 
@@ -754,10 +1230,10 @@ Runs: hot tier retained until explicitly archived (disk watermark: engine alerts
 of /dev/sdf, refuses new runs at 95 % — FM-6; deletion is human/operator choice, never
 automatic — physics evidence is the product). Promoted objects: MinIO versioning with
 Keep-Version retention, no auto-expiry [proposal; revisit when >500 GB]. Git: append-only.
-Scratch: 24 h pruning, safe by §9.1 definition. Backup cadence: heat-data nightly mirror to the **canonical backup root**
+Scratch: 24 h pruning, safe by §9.1 definition. Backup cadence: heat-data nightly **application-consistent backup under the §6.9.1 quiesce-and-wait** policy to the **canonical backup root**
 `/mnt/c/Users/steven/OneDrive/Backup/HE-toolstack/` (ruling D-14, NFR-22; §6.9 — OneDrive-managed,
 WSL-visible); the legacy second-disk copy (`/home/steven/backups` [E]) is optional extra local
-redundancy, never a restore source. RPO = last nightly + git (NFR-19).
+redundancy, never a restore source. **RPO = last `DONE.json` completion marker + git (NFR-19) — a LOCAL-COMPLETION RPO: off-host durability is unproven pending the §6.9.4 L4/L5 proof gap (OQ-9).**
 
 ### 9.5 Versioning and integrity
 Images: semver tags + immutable digest pins in `docs/MANIFEST`; `pull_policy: never` means
@@ -769,27 +1245,83 @@ cross-referenced §11.6.
 
 ---
 
+### 9.6 Restore drill from the canonical destination (T-11; consistency alarms T-18) [design]
+
+**Execution status: NOT executed.** The stack does not exist (§7 law). **T-11 has not passed and
+nothing in this package may state or imply that it has** — runtime tests are *specified, not
+executed* (DesignStandards: proposed ≠ verified). This section specifies what the drill will
+prove, all steps reading `$ROOT = /mnt/c/Users/steven/OneDrive/Backup/HE-toolstack/` (the
+canonical destination, never the live source):
+1. **Preflight / selection:** newest dated dir with a schema-valid `DONE.json` (no-DONE =
+   incomplete → §6.9.2 step 8, excluded); re-hash every file against its manifest before any
+   restore action (digest chain re-established at drill time); open
+   `drills/T-11/<runid>.log`.
+2. **SQLite integrity + WAL consistency:** snapshot DBs restored to scratch → `PRAGMA
+   integrity_check` + `quick_check` clean; WAL folded inside the online-backup product (no
+   stray `-wal` dependency); state spot-checks vs `DONE.json.quiesce` block.
+3. **Run-state / job-state reconciliation:** in a **disposable copy** of heat-data (isolation
+   dir — never the authoritative path), start the stack → FR-37 matrix converges every run to
+   terminal-or-queued with zero manual repair (§8.6); services reach `healthy` (design-time).
+4. **Artifact digests:** included-set re-hash == manifest, exactly.
+5. **MinIO object integrity + version-history behavior:** current-payload recovery digest match;
+   **version-export count == version-manifest count == overwrite count** (T-22 acceptance — the
+   falsifiable test behind §6.9.3, not an assumed property).
+6. **Git bundle recovery:** `git bundle verify $ROOT/repo/*.bundle` + clone to temp; HEAD ==
+   `DONE.json.repo.head`.
+7. **Completion marker + manifest integrity:** DONE.json validates, self-digest round-trips,
+   dir name matches `runid`.
+8. **OneDrive read-back evidence (L5, §6.9.4):** attach current L5 artifact — M0 = signed manual
+   web read-back log; Graph-based once OQ-9 decides. **No L5 evidence → drill is INCOMPLETE,
+   not passed** (honesty rule; absence is a result, not a footnote).
+9. **Post-restart reconciliation:** `/readyz` + `/deps` + status endpoints answer; ledger parses; no orphan
+   claimed (no live lease §8.8); evidence log closed with per-step pass/fail.
+
+**Acceptance criteria (conjunction):** integrity_check clean · destination digests == manifest ·
+version-export counts match (T-22) · repo HEAD restored · reconciliation converges, zero manual
+repair · DONE.json valid · L5 evidence attached · **the drill was actually executed** and its
+log is the artifact.
+
+---
+
 ## 10. Security Design
 
 ### 10.1 Threat model (proportionate: single trusted operator, one physical box, no
 internet-facing surface)
 | Threat | Vector | Mitigation | Residual |
 |--------|--------|-----------|----------|
-| Stray process / other container reaching stack API | compose net or LAN hit :8100 | loopback bind enforced (entrypoint fail-fast check §11.6) + no published port on compose net; T-15 negative test | host-local processes (same trust domain — accepted) |
+| Stray process / other container reaching stack API | compose net, default bridge, or LAN hit :8100 | **structural (r7): zero published port for 8100 (a host `:8100` listener of any kind = preflight failure) + dedicated `he-agent` network whose members are only toolserver + agent** — a non-member has no route to the port, proven per-leg by the T-15 six-leg matrix (legs 2/3/5/6 negative; expected results derived from mechanism, execution due M0) | host-local processes reaching `make health`'s launched container = same trust domain (accepted); MinIO published ports carry the documented residual (§5.4b) |
 | Data exfil / tamper via credentials in repo | gitleaks CI [E-proven pattern]; secrets only in `deploy/.env` (gitignored) + env injection | `.env` file perms 600, host uid 1000 | operator disk trust |
 | Container escape via spawn channel | OQ-5 docker.sock mount | preferred resolution: sidecar-scoped socket (option b) — flagged as the review-gate decision, NOT swept under a default | if option (a) chosen: host-trust equivalent, documented |
 | Malformed params → solver abuse (path traversal, arg injection) | toolserver validation | schema-enforced params (allowlist per job_type), run-dir jail (bind only that dir; `--network none`; read-only rootfs where image allows) | solver-internal bugs (out of scope; images are pinned OSS) |
 | Supply chain (image substitution) | registry pull | A6: no pulls at runtime (`pull_policy: never`) + digest admission + MANIFEST CI (FR-16/NFR-11); seed script writes digests from build provenance | seed-tar tampering = host trust; Chainguard question OR-05 |
 | Prompt-injection-adjacent (agent tricked into destructive API calls) | agent compromise is upstream of stack | idempotency not authority: no destructive endpoints exist (no delete/overwrite paths in §7.2 — deletion is filesystem-only, human-mediated) | honest note: full agent-integrity is a platform concern, out of scope here |
+
+- **Spawn-sidecar row (v1.1, FINDING-03, ADR-D-16 Proposed at filing — ruled ACCEPTED Option B 2026-11-16, conflict resolved by operator 2026-11-17):** the socket's *only* holder
+  becomes the highest-value container escape target. Mitigations that are normative for
+  option B: distroless-grade minimal image, read-only rootfs, no env secrets, API auth =
+  per-deploy shared secret over `he-internal` net (no host port), **server-side** spawn
+  contract enforcement (allow-listed image@digest, network=none, cap-drop ALL, non-root,
+  cpu/mem ceilings, bind-path prefix allow-list) — the sidecar refuses requests it did not
+  construct policy for, so an engine compromise alone cannot `docker run -v /:/host`:
+  attacker must also break the contract validator. Residual honest limit: a compromised
+  sidecar is still root-equivalent (Docker daemon truth); B moves the wall, thins the
+  privilege, and audits the crossing — it does not eliminate the class. Option A's
+  *cheaper* alternative is accepted only with the operator's eyes open (OQ-5).
 ### 10.2 Authentication/authorization
-**None at the HTTP layer — by explicit design** (loopback = the control; F-1). No JWT/API
-keys are implied anywhere in §7. Cross-container: shared Docker network isolation + MinIO
-root creds scoped to engine container env only. Deferred options (never claimed present):
-mTLS or token auth if the bind ever moves off loopback — that move *requires* an ADR.
+**None at the HTTP layer — by explicit design.** The control is **`he-agent` network
+membership, r7** — *not* a bind address: binding to loopback (any namespace) is exposure
+control and has never been authentication or authorization (F-1 documents the deferral, never
+implies presence). No JWT/API keys are implied anywhere in §7. Cross-container: per-network
+Docker ACL scoping (membership checked per packet; `he-agent`/`he-internal` are separate
+networks — a compose-net or bridge container gets no service-DNS alias and no route to the
+toolserver, T-15 legs 2/3/6) + MinIO root creds scoped to engine container env only. Deferred
+options (never claimed present): mTLS or token auth if membership ever widens beyond the
+two-member rule — that move *requires* an ADR.
 ### 10.3 Data protection
 At rest: no encryption at rest on host ext4 (single-user workstation trust; stated, not
-hidden); MinIO SSE not enabled initial release [proposal, revisit at M2]. In transit: HTTP
-loopback (no TLS — same trust domain); to GitHub: HTTPS/git over TLS (platform); to MinIO
+hidden); MinIO SSE not enabled initial release [proposal, revisit at M2]. In transit: HTTP on the
+`he-agent`/`he-internal` networks (no TLS — membership-gated, same trust domain; r7 wording — it is
+not 'loopback', there is no loopback path to the service at all); to GitHub: HTTPS/git over TLS (platform); to MinIO
 from tool containers: in-network plain HTTP *only on the internal bridge* — flagged.
 Secrets: `.env` + env-injection; gitleaks; the cognee/agent PATs live outside the stack
 entirely.
@@ -823,16 +1355,43 @@ mount healthy; Ollama embeddings live (co-resident check, informational); GPU pr
 (C6 state recorded at every preflight — honesty mechanism).
 
 ### 11.3 Compose topology [P — the normative file lives at `deploy/docker-compose.yml`]
-Services: `toolserver` (build `images/toolserver`, loopback `127.0.0.1:8100:8100`),
-`workflow-engine` (build `images/workflow-engine`, binds heat-data rw, OQ-5 spawn channel,
-`depends_on: minio: healthy`), `minio` (image digest-pinned in MANIFEST, `pull_policy:
-never`, volume `./heat-data/minio`, ports `127.0.0.1:9000/9001` operator-only). Profiles:
+Services: `toolserver` (build `images/toolserver`; **no `ports:` entry for 8100 — zero host
+publication, D-15 Accepted**; attached to the dedicated `he-agent` network, §6.1/§11.6),
+`workflow-engine` (build `images/workflow-engine`, binds heat-data rw, spawn via sidecar API D-16,
+`depends_on: minio: service_started` — F6/ADR-D-17: NOT `service_healthy`; engine treats
+MinIO as an optional dependency and self-degrades promotion, §6.2), `minio` (image digest-pinned in MANIFEST, `pull_policy:
+never`, volume `./heat-data/minio`, ports `127.0.0.1:9000/9001` operator-only), `spawn-sidecar` (D-16 accepted 2026-11-16: sole
+`/var/run/docker.sock` holder, `he-internal` only, digest-pinned allow-list, `cap_drop:
+ALL`, non-root; §6.2b), `he-scratch-keeper` (long-lived scratch reaper, §6.8; long-lived
+helpers stay ≤2). **Class-C canonical list = these 5 core services (TD §6.10).** Profiles:
 `gpu` (adds `gpu-probe` sidecar that samples nvidia-smi into heat-data/metrics/ when host
 passthrough verified — inert until C6), `console`, `postgres` (F-2 parked). Tool images are
 NOT compose services (one-shot spawns per job — §6.2) except none-run-daemons: correct —
 zero long-running solver containers (verified stance carried from attempt 1 [E]).
 Every service: healthcheck, `restart: unless-stopped`, json-file caps, `user: "1000:1000"`
 where image supports (audit NFR-08), image pinned by **digest** not tag (T-16).
+- **Network bindings (r7, D-15 rev supersedes the v1.1 literal-publish rule):** the compose
+  file MUST declare top-level `he-agent` (internal) with the toolserver attached and MUST publish
+  **no host port for 8100 — under any prefix**. Any `:8100` host listener (bare OR
+  `127.0.0.1:`) = preflight failure: the old `"127.0.0.1:8100:8100"` requirement is **RETRACTED**
+  (measured [V 2026-11-16]: loopback-published ports are gateway-reachable from every engine
+  container — publishing even loopback fails the peer-container negative test by construction).
+  Inside-container `TS_BIND=0.0.0.0` remains required (§6.1 layer 1) and is not exposure.
+  spawn-sidecar publishes NOTHING; job containers spawn `--network none` (sidecar-enforced).
+- **Client-URL probe (r7, replaces the v1.1 gateway-URL probe):** preflight runs, **from
+  inside the agent container** (`docker exec <hermes> python3 -c "urllib probe"`), `GET
+  /healthz` against **`http://toolserver:8100`** (he-agent service DNS) — this is the *only*
+  connectivity proof preflight accepts, paired with the **negative leg** from a fresh
+  non-member container (service name unresolvable + gateway :8100 refused, T-15 legs 2/3).
+  The old gateway-URL probe is **RETRACTED** — it probed the retracted host-publish topology.
+  Host-side curl remains supplementary, never the acceptance test (F1).
+- **Lifecycle labels (F2; canonical label `he-stack=1`):** compose services get label
+  `he-stack=1` + compose project label; class J gets `he-stack=1` + `he-run=<id>` +
+  `he-job-id=<id>` at sidecar spawn. Post-`make down` assertion (six-step sequence, §6.10):
+  `docker ps -a --filter label=he-stack=1 -q | wc -l` == 0 (classes C∪J; class X excluded —
+  host timer, not a container) **and** `docker compose ps -a` empty (T-13). Bare
+  `docker compose down` satisfies only the second half (class C) — never an acceptance target.
+
 
 ### 11.4 Configuration management
 Layering (precedence low→high): compose defaults → `deploy/.env` (committed `.env.example`,
@@ -846,7 +1405,7 @@ env-injected.
 | Key | Default | Consumer | Notes |
 |-----|---------|----------|-------|
 | `HE_DATA` | `/home/steven/HE-toolstack/heat-data` | all | D-05 owner dir |
-| `TS_BIND` / `TS_PORT` | `127.0.0.1` / `8100` | toolserver | bind non-overridable away from loopback (entrypoint guard) [proposal] |
+| `TS_BIND` / `TS_PORT` | `0.0.0.0` / `8100` | toolserver | **inside-container listen layer only (r7)** — must be `0.0.0.0` on the container interface for Docker's forwarding path; NOT an exposure knob: host publication is a *separate* compose `ports:` concern and is ZERO for 8100 (D-15 rev; §6.1 two-layer note). The old `127.0.0.1`-default + 'non-overridable away from loopback' guard is RETRACTED (in-namespace loopback bind would break the service-DNS path other containers use to reach it) [proposal] |
 | `QUEUE_DB` | `$HE_DATA/stack.db` | engine+toolserver | WAL |
 | `MAX_CONC_CPU` / `MAX_CONC_GPU` | `2` [proposal] / `1` (D-04) | engine | gpu=1 is a ruling, not tuning |
 | `GPU_VRAM_CEILING_GIB` | `8` (D-04, OQ-2) | admission | job-declared ceilings validated against it |
@@ -903,18 +1462,31 @@ prohibition: no step a fresh session can't run blind)
   succeeded stand (design §6.5).
 - **R-7 disk full:** engine refuses at hard watermark (FM-6); operator archives cold runs to
   archive disk (promotion copies exist in MinIO) — decision support: `du` report command.
-- **R-8 backup health / stale mirror:** timer missed or `BACKUP_ROOT` unreachable (C: unmounted,
-  OneDrive paused): nightly job writes a ledger line + sentinel `heat-data/backup.status.json`
-  (`{ts, bytes, dest}`); `make doctor` fails if sentinel age > 36 h [P]. Fix path: re-mount/enable,
-  re-run job manually (`make backup`), confirm sentinel + OneDrive sync state; if root is gone for
-  >7 days, escalate: hot data is single-copy — pause promotions? no: promotions continue (git +
-  MinIO tiers unaffected), but flag `backup_stale` in healthz (NFR-22 guard).
+- **R-8 backup health / stale backup (two-part, §6.9.4):** **(i) L2/local** — timer missed, `BACKUP_ROOT` unreachable (C: `/mnt/c` unmounted, OneDrive paused), or **no fresh valid `DONE.json`** under the canonical root within cadence + grace: nightly job writes a ledger line + sentinel `heat-data/backup.status.json` (`{ts, runid, dest, done_verified}`); `make doctor` fails if sentinel age > 36 h [P]. Fix path: re-mount/enable → run `make backup` → confirm DONE appears. **(ii) L5/remote** — `drills/onedrive-readback.log` mtime older than 7 d [P] → operator reminder: manual web read-back due (M0 default) or Graph automation once **OQ-9** decides. `attrib` placeholder inspection is **negative-only** diagnosis (attribute set ⇒ provably not uploaded yet; cleared ⇒ still unproven), never a completion check. Promotions continue during staleness (git + MinIO tiers unaffected) but `backup_stale` surfaces in healthz (NFR-22 guard).
+- **R-9 Docker-daemon restart drill (RC-3):** `sudo systemctl restart docker` (host)
+  with one synthetic job running ⇒ all containers return ⇒ reconcile log shows re-adopt or
+  re-queue decisions per §8.6 ⇒ job completes, ledger gapless. Runs as part of M0 acceptance
+  [new — review §5.5: daemon restart is a real WSL2 event class, never lumped with RC-1].
 
 ---
+
+### 11.9 Host-level externals (class X and non-stack containers) [r9 — closes the dangling §11.9 refs]
+Containers/units outside the compose project, each with exactly one non-compose owner:
+- **Backup timer (§6.9):** host **systemd timer** — lifecycle class **X** (D-01 A1). Not a
+  container; excluded from `docker ps` and from every zero-container stack assertion (T-13).
+- **Hermes agent container:** host-run (outside this compose project); lifecycle owner =
+  its own host runner. Joins `he-agent` as an external network member (§6.1) — membership,
+  not compose ownership.
+- **Inference containers (Ollama / SGLang):** co-resident host infrastructure, boundary
+  §2.6 — no runtime dependency claimed; not stack-owned, not in any stack assertion.
+`docker compose ls` therefore shows exactly **one** `he-toolstack` project; everything else
+is external by this table, never an unlabeled orphan (NFR-10).
 
 ## 12. Reliability and Failure Analysis
 
 ### 12.1 Failure-mode table
+13 failure modes (FM-1…FM-13; FM-11…FM-13 added at round 2 — stated count kept in sync
+with the table by gate Q16).
 | ID | Failure | Likelihood (basis) | Impact | Detection | Mitigation (design) | Recovery | Tested |
 |----|---------|--------------------|--------|-----------|---------------------|----------|--------|
 | FM-1 | toolserver crash | med (any new code) | API unavailable; jobs unaffected | healthz fail | stateless edge; auto-restart policy | auto; idempotent client retries | T-07 kill matrix |
@@ -927,6 +1499,11 @@ prohibition: no step a fresh session can't run blind)
 | FM-8 | torn state.json | designed-out [P-claim] | session misreads state | N/A (atomic rename) | rename-on-write + digest in ledger | — | T-07 write-window kill |
 | FM-9 | git remote unreachable | real precedent [E Stage-E friction] | ledger local-only | push-retry counter in logs | local queue + retry (A13); process continues | push drains on restore | contract-test w/ mock remote [proposal] |
 | FM-10 | image digests drift from MANIFEST | low | wrong-bits physics | admission refuses (`409 digest_unpinned`) + CI | pull_policy never; seed is the writer | re-seed / MANIFEST update via ADR-shaped review | T-16 |
+
+| FM-11 | **Daemon restart wedges orphaned `running` rows** (WSL2 class RC-3) | real class [V C6 volatility] | jobs stuck-looking; queue stalls | boot+tick reconcile (§6.2 long-running bullet) | re-adopt or re-queue per §8.6 matrix | ≤ lease window | **R-9 drill** (new) |
+| FM-12 | **OneDrive backup target offline/paused at job time** (Windows-side sync daemon) | med [V: user runs OneDrive] | backup write fails silently | §6.9: write-only-when-reachable check + last-success stamp + ALERTS line | next nightly retried; staleness escalates at 72 h | T-18 (new) |
+| FM-13 | **D-05 disk loss** (`/dev/sdf` ext4 volume dies) | low-med (1 TB shared mech disk [V]) | **only unrecoverable class** | RPO ≤24 h backup (§6.9) | RC-5 restore drill evidence | R-5 |
+
 ### 12.2 Backups & restore
 Backup = host-dir mirror (nightly) to the canonical backup root
 `/mnt/c/Users/steven/OneDrive/Backup/HE-toolstack/` (§6.9, D-14) + git bundle of `workflows/` into the
@@ -948,6 +1525,23 @@ is the operator (T-02 doubles as ops-readiness proof). No 24/7 posture claimed; 
 exceeds one operator's attention (metric: ALERTS.md volume at M2 review), tripwire §8.7 /
 F-3 revisited with data.
 
+### 12.5 Failure-class taxonomy  [FINDING response, GitHub #9 / review §5.5 — added 2026-11-15]
+Generic "restart and resume" is replaced by seven named classes, each with **detection →
+affected state → required action → proven-by**:
+| Class | What died | Detection | State consequence | Required action | Proven by |
+|-------|-----------|-----------|-------------------|-----------------|-----------|
+| RC-1 **Process restart** (compose-managed service) | uvicorn/engine process inside a live container | `restart: unless-stopped` + healthcheck gap | none (WAL survives; leases held ≤60 s) | automatic; engine boot reconcile pass (§8.6) | T-07 kill matrix |
+| RC-2 **Container restart** | container (OOM, `docker restart`, image change) | compose restart counter; boot banner digest | same as RC-1; scratch `jobs/<id>/` survives (heat-data) | automatic + boot reconcile | T-07 variant |
+| RC-3 **Docker daemon restart** | dockerd (host-side; **real event class on WSL2**, C6 precedent [V]) | every container restarts together; engine boot sees **all** jobs as `running` with no live container | jobs re-adopted **only if** their container is back within lease window, else re-queued (idempotent exec absorbs) | automatic; R-1 check "docker state vs queue state" | T-07 + **R-9 (daemon restart drill)** |
+| RC-4 **Host reboot** | whole box (WSL shutdown, Windows update — routine here [V]) | fresh boot: nothing runs until operator (or WSL session) brings the stack up | heat-data intact (ext4 on `/dev/sdf`); queue resumable; **no auto-start claim** — stack starts when the WSL session exists | `make up` (runbook R-1) + boot reconcile; verify backup freshness | R-1 + R-5 drill |
+| RC-5 **Host disk failure** (`/dev/sdf`) | authoritative state volume | data unreadable/missing | **total state loss** — the only unrecoverable-without-backup class (D-05 single point, stated) | restore §6.9 procedure to fresh WSL + seed script; RPO ≤24 h hot tier | **R-5 full restore drill (the only credible evidence)** |
+| RC-6 **Network outage** (GitHub remote / LAN) | connectivity, not data | push-retry counter (FM-9); `git push` fails | ledger+state local and consistent; no job impact (loopback) | continues locally; drains on restore | T-09 (mock remote) |
+| RC-7 **Agent context loss** (session ends/crashes) | the *agent*, not the stack | new session starts with empty memory | **zero** stack consequence — state law (D-02): `workflows/` + `state.json` + ledger are the memory | new session reads the ledger + `workflows/` (resumption law, §2.1 goal 2 / §8.8), resumes from open ticket files | **T-02 doubles as this proof (a fresh session is the operator)** |
+Key claims that survive: RC-1..RC-4 need no operator and no restore; RC-5 is the only
+backup-dependent class; RC-7 is deliberately out-of-scope for the stack because state is
+externalized (§5.4-6, FR-11). Agent-caused *misuse* (e.g. a dying session leaves a stale
+`claimed:` line) is a stale-claim problem handled by §8.8, not a recovery class.
+
 ---
 
 ## 13. Performance and Scalability
@@ -964,7 +1558,7 @@ work). Read paths (status/candidates) see bursts of agent polling (~1 req/30 s/s
 1. **GPU: 1 concurrent job, by ruling** — GPU throughput is *capped by policy*, not tuned;
    class is off anyway until C6 (FM-5). 2. **CPU class: N cores ÷ MAX_CONC_CPU** — queueing
    theory is the design (FIFO + priority tie-break; no fancy scheduling claimed). 3. SQLite
-   WAL single-writer: insert-only toolserver path keeps write contention trivial at this
+   WAL single-committer db-wide: the submissions-inbox write path (§7.5 r3 — toolserver INSERT-only, engine sole queue writer) keeps write contention trivial at this
    volume; the known ceiling (≈single-digit thousands writes/s local WAL) is ~3 orders above
    load — revisit trigger: >50 submissions/s sustained (never expected; F-2 = postgres trip
   _wire, recorded not acted). 4. heat-data I/O: solver I/O stays in run work dirs on ext4
@@ -992,7 +1586,7 @@ cache-invalidation surface exists.
 
 ## 14. Alternatives Considered
 
-Full evidence lives in `HE-TOOLSTACK-ADR.md` (12 ADRs incl. rejected options D-02/D-03/D-05/
+Full evidence lives in `HE-TOOLSTACK-ADR.md` (17 records — numbering note: no D-13 record was ever made; the …D-18 range has that phantom gap — incl. rejected options D-02/D-03/D-05/
 D-08/D-09/D-10/D-12/X-1…X-8 with rejection reasons). The five architecture-level ones:
 **D-01 single compose vs split infra** — split re-created the C4 orphan exactly as observed;
 rejected. **D-02 files-first engine vs LangGraph/Temporal** — durable-exec platform cost on
@@ -1043,7 +1637,7 @@ pass, digests match E-ledger values [E]) + **T-07** crash-matrix pass (required 
 artifact, D-02 honesty condition) + **T-13** zero-orphan + **OR-01 timing recorded** (<10 min
 target — measured, reported, not claimed). *Cleanup:* scratch dirs pruned, no stray
 containers/images post-suite, `make down` clean. *Exit gate:* all above green + fresh-session
-resume smoke (mini-T-02). [no date claim — sequencing: after OQ-1/OQ-4 sign-off and OQ-5 resolution].
+resume smoke (mini-T-02). [no date claim — sequencing: after OQ-4 sign-off (OQ-1 closed 2026-11-17, OQ-5 resolved 2026-11-16)].
 
 **M1 — breadth: 6 tool classes + registry.** *Adds:* openfoam-esi/gmsh/calculix/agentcad job
 types, registry + gate-verification triggers, sweep comparison queries, candidate A/B
@@ -1072,14 +1666,20 @@ verified before any M3 planning session, same discipline as C6.
 ## 17. Open Questions and Risks
 
 ### 17.1 Open questions (each: why it matters / who decides / when)
+
+> **Mirror note (r5):** OQ-8 (MinIO version-history fallback, §6.9.3/T-22) and OQ-9 (OneDrive L4/L5
+> upload-proof mechanism, §6.9.4) are registered in **ADR §4 only** — the ADR is the canonical
+> register (gate Q7 compares TD table rows ⊆ ADR); TD references them from §6.9 body text.
 | ID | Question | Why it matters | Decides | When |
 |----|----------|----------------|---------|------|
+| OQ-1 | **RULED 2026-11-17 — CLOSED: operator accepted ADR-D-02 as written ("OQ-1 accepted as written") — files-first + ~200-line runner + tripwires stands.** | wrong-layer complexity if wrong | ~~reviewer~~ operator | ~~design freeze~~ satisfied |
 | OQ-2 | GPU VRAM ceiling/floor final values (D-04 defaults 8/5.5 GiB) + C6 re-measure ticket execution | gates `GPU_CLASS_ENABLED`; numbers are safety margins for co-resident LLM services | operator (Steven) w/ measured nvidia-smi data | before GPU profile activates; **not** blocking M0–M2 (FR-19) |
 | OQ-3 | PD-toolstack D-ledger historical import: which candidate rows are worth mining into the registry? | free provenance for sweeps vs migrating attempt-1 cruft | operator + agent triage pass | during M1 (registry live) |
 | OQ-4 | physics-gate endpoint wrapper (D-06) + registry/SQLite colocation (D-08) acceptance. | M0 design freeze | reviewer | design freeze |
 | OR-05 | MinIO Chainguard-hardened rebuild (open ticket [E]) — rebuild at seed-script authoring or leave digest-pinned OSS image? | supply-chain posture of the evidence tier | operator | before promote is load-bearing (M1) |
-| OQ-5 | **Job spawn channel** (§6.2): docker.sock mount vs scoped sidecar vs host-unit engine | decides the security-critical component; docker.sock = escape-class power in a container | operator (security posture call) | **M0 blocker** (runner can't spawn without it) |
-| OQ-6 | toolserver shares SQLite WAL vs engine-internal HTTP (§7.5) | coupling vs one-less-hop; both defensible | reviewer at formal review (§18) | design freeze |
+| OQ-5 | **Job spawn channel** (§6.2) — **CLOSED 2026-11-16: operator ruled Option B (scoped spawn-sidecar, ADR-D-16 Accepted).** Residual honestly kept: compromised sidecar still root-equivalent | decides the security-critical component; docker.sock = escape-class power in a container | operator (security posture call) | **M0 blocker CLOSED — implementation may build §6.2b** |
+| OQ-6 | toolserver shares SQLite WAL vs engine-internal HTTP (§7.5) — **CLOSED 2026-11-16: operator ACCEPTED ADR-D-08 Amendment A1 (submissions inbox; toolserver INSERT-only); §8.4b/§7.5/§6.1 freeze as written; T-23 acceptance test** | coupling vs one-less-hop | reviewer + operator (ADR-D-08 A1) | design freeze |
+| OQ-7 | **Bind topology** — **CLOSED 2026-11-16: operator ACCEPTED D-15 Option D (dedicated `he-agent` network, toolserver publishes nothing).** | agent can reach tools at all (FINDING-01 proof: published-port topology measurably fails) | operator | design freeze; **ruled** |
 ### 17.2 Risk register (top 5, owner + mitigation + contingency)
 | Risk | Owner | Mitigation | Contingency if it lands |
 |------|-------|-----------|------------------------|
@@ -1093,22 +1693,21 @@ verified before any M3 planning session, same discipline as C6.
 
 ## 18. Formal Review Readiness
 
-**Self-assessment vs §7 checklist.** Complete: every §6 component answers the §7 question
-set (problem, necessity, responsibilities, interfaces, data, dependencies, failure, tests,
-deployment, limits) or is explicitly [P]; requirements traceability 100% (64 IDs →
-components → T-tests, matrix in REQUIREMENTS §5, script-verified); interfaces specified at
-process boundaries (§7 all, incl. error envelope, timeouts, versioning, idempotency); no
-undocumented internals; failure modes tabled (FM-1…10) w/ recovery runbooks R-1…7;
-performance/limits stated w/ measurement plan (no unverifiable claims — every speed/size
-number cites [V]/[E] or is marked [proposal]/target); operational procedures testable by a
-fresh session (R-runs are the review artifact); migration/rollback/backup in §11/12;
-open questions **surfaced not hidden** (OQ-2…6). **Gaps acknowledged honestly:** performance
-numbers are targets + measurement plans, none measured (stack not yet built — saying so *is*
-the honesty requirement met); T-08/T-09 will revise §13.1 assumptions [U]; diagrams 1–8 are
-design views, matching the §6/§8 text they annotate. **External input needed:** OQ-5 (blocker),
-OQ-1/OQ-4 sign-off, OQ-2 timing (non-blocking), reviewer call on OQ-6. **Verdict
-(proposed):** *approve with exceptions* — condition: OQ-5 resolved before M0 build starts;
-nothing else found that changes structure.
+**Self-assessment vs §7 checklist (v1.2 snapshot, re-run 2026-11-15 — filing-time record, superseded by rounds 2–13: the then-baselines **66 IDs**/**T-01…19**/OQ-2…7 no longer describe the current register (42 FR + 24 NFR, T-01…T-24, OQ-1…OQ-9 with OQ-1/OQ-5/OQ-6/OQ-7 closed); current traceability is re-checked per branch gate, not standing.**
+Complete: every §6 component answers the §7 question set or is explicitly [P]; traceability
+100% (**66 IDs** → components → **T-01…19**, matrix in REQUIREMENTS §5, script-re-verified
+this revision); interfaces at process boundaries (§7 incl. error envelope, 201 contract,
+timeouts, versioning, idempotency); FM-1…**13** + RC-1…7 failure taxonomy (§12.5) with
+runbooks R-1…**9**; durability contract explicit (§5.4a); security boundaries in one table
+(§5.4b); performance/limits all cited or marked [proposal]; fresh-session operability
+(R-runs + §8.8 claim protocol); open questions surfaced (OQ-2…7). **Gaps acknowledged
+honestly:** performance numbers remain targets (stack unbuilt — stated, not hidden); §13.1
+payload/poll assumptions stay [U] until T-08 measures; diagrams D1–D9 are design views.
+**External input needed (v1.2):** OQ-5/D-16 spawn-channel ruling (M0 blocker), D-15 bind
+topology accept, D-08 A1 + D-17/D-18 accepts, OQ-2 timing (non-blocking), OQ-1/OQ-4 sign-off **(v1.8 update: OQ-1 CLOSED 2026-11-17 — D-02 accepted as written; D-15/D-16/D-08 ruled 2026-11-16)**. This 2026-11-15 line is otherwise retained as filing-time text.
+**Verdict (proposed): APPROVE WITH EXCEPTIONS** — structure complete and internally
+consistent; the named exceptions are the operator decisions above, each with a filed ADR,
+alternatives, and a recommendation; D-16 gates M0 build start by design.
 
 ---
 
@@ -1120,7 +1719,7 @@ Coding/working rules that make the design keep working (process, not product):
    design assumption, not the edge case (attempt-1 death mode [E D25]). 3. **Contracts before
    endpoints:** T-08 fixture files merged *before* server code marks endpoints done (§5.4-5).
    4. **Internet-first with `ref:` provenance:** solver invocations carry config+input+
-   code digests end-to-end (FR-13/T-12); no result without its `ref:` chain. 5. **Image =
+   code digests end-to-end (FR-13/T-04, T-10 per the r2 ID disambiguation); no result without its `ref:` chain. 5. **Image =
    capability** (D-10): a Dockerfile that grows a second tool is a review error — split it.
    6. **Write-ahead ordering in code, not docs** (§5.4-3): one function `commit_boundary()`
    in runner; tests assert order under kill -9 (T-07). 7. **Cleanup is acceptance** (user
@@ -1144,10 +1743,10 @@ category driving admission. Tier: hot (heat-data) / cold (MinIO) / git (process)
 time-boxed running-claim in queue enabling crash recovery. Slice: M0's single end-to-end
 path. Tripwire: pre-agreed condition that converts "feels wrong" into a decision (§8.7).
 
-### Appendix B — Diagram index (mermaid sources inline; 8 required views)
+### Appendix B — Diagram index (mermaid sources inline; 8 required view *types*, 9 diagram instances D1–D9 — r12-synced: D7/D8 sequence views share the failure/e2e-sequence type)
 D1 system context (§5.1) · D2 logical components (§5.2) · D3 deployment boundaries (§5.3) ·
 D4 network communication (§5.3) · D5 ticket lifecycle (§8.1) · D6 M0 flow (§8.3) ·
-D7 state-maintenance timeline (§D7 below) · D8 backup/restore sequence (§D8 below).
+D7 state-maintenance timeline (§D7 below) · D8 backup/restore sequence (§D8 below) · D9 lifecycle/shutdown (§6.10, v1.1; **r9 redraw** to the six-step `make down` + D-16 spawn boundary). D1/D3/D4 carry r9 spawn-path redraws (D1 spawns via the accepted D-16 sidecar; D3 drops the legacy socket-exposure alternative and its open-question marker; D4 labels the accepted spawn edge).
 
 ### D7 — Data flow of one M0 run (write-ahead ordering visible end-to-end)
 ```mermaid
@@ -1176,27 +1775,32 @@ sequenceDiagram
     A->>TS: GET /runs/{id} -> state, gate, evidence links
 ```
 
-### D8 — Backup & restore (T-11 / R-4 normalized)
+### D8 — Backup & restore (T-11 / R-4 normalized; §6.9 round-5 rewrite)
 ```mermaid
 sequenceDiagram
-    participant H as host ops (nightly mirror)
-    participant HD as heat-data
-    participant M as minio (versioned)
-    participant N as fresh/rebuilt env
-    Note over HD: steady state: runs + stack.db + ledger mirror + minio/ volume
-    H->>HD: mirror nightly -> OneDrive/Backup/HE-toolstack [RPO <= 24h, D-14]
-    Note over M: promoted objects carry MinIO version IDs (registry-linked)
-    N->>HD: restore from backup root (via WSL)
-    N->>M: make up (minio recovers from in-dir volume)
-    N->>M: GetObject(bucket,key,versionId) per registry evidence row
-    N->>N: sha256 compare vs registry digests (pass = restored)
-    N->>N: M0 smoke slice green = env trustworthy (R-4 done-check)
+    participant H as host ops timer robocopy driver
+    participant HD as heat-data ext4 authoritative
+    participant C as OneDrive root candidate then dated dir on NTFS
+    participant M as minio versioned bucket
+    participant N as fresh or rebuilt env
+    H->>HD: quiesce pause file then wait active jobs to zero else abort
+    H->>HD: sqlite online backup plus cp -a plus manifest into ext4 snapshot
+    H->>C: robocopy snapshot into candidate dir L2 local copy
+    H->>C: verify every destination digest then write DONE.json
+    H->>C: publish rename within NTFS volume into dated runid dir
+    Note over C: OneDrive upload completion NOT provable locally L4 L5 gap OQ-9 manual web read-back is the L5 evidence
+    H->>M: version export rclone s3-versions payloads plus mc ls versions manifest mc mirror withdrawn
+    N->>C: select newest dated dir with valid DONE.json restore reads canonical destination
+    N->>HD: restore DBs with integrity check plus artifacts with digest match via disposable copy
+    N->>M: minio recovers current payloads version restore by re-upload from export T-22 proof
+    N->>N: FR-37 reconciliation plus marker manifest HEAD checks plus L5 evidence per 9.6
 ```
 
 ### Appendix C — Document QA self-check
 Every §6 component states its code lineage ([existing]/[P]/[asset]) — C1-class phantoms are
-structurally visible. Numbered cross-refs used: FR/NFR/T/OR (REQUIREMENTS v1.0), D/X/F/OQ
-(ADR v1.0), C/G (PHASE1), FM/R (this doc §11–12), D1…D14 (attempt-1 ledger evidence IDs).
-No performance number appears without [V]/[E]/[proposal] tag. Diagrams 8/8. Sections 19/19
+structurally visible. Numbered cross-refs used: FR/NFR/T/OR (REQUIREMENTS **v1.10**, r12-synced; was v1.4), D/X/F/OQ
+(ADR **v1.11**, r12-synced; was v1.2), C/G (PHASE1), FM/R (this doc §11–12), D1…D14 (attempt-1 ledger evidence IDs).
+No performance number appears without [V]/[E]/[proposal] tag. Diagrams 9/9 (D1–D9, r2-synced
+— was "8/8" stale). Sections 19/19
 (§11.5 numbering note). Unverified: every pinned-version "at first build"
 row (§15) and OR-01 timing — both *deliberately* empty rather than guessed.
