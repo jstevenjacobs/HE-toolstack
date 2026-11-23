@@ -27,5 +27,7 @@ DP-R2a repair annotation in-place so the reconstruction is self-documenting.
   (gate-run-postfix.txt, this directory). Pre-repair baseline on main: 27/0 —
   the truncation was invisible to the predicate (header alone satisfied it); the
   repair makes the TEXT verifiable without changing any gate result.
-- r16-era header versions unchanged (REQ v1.10 / TD v1.13 / ADR v1.11) — Q16 pins
+- r13-era header versions unchanged (REQ v1.10 / TD v1.13 / ADR v1.11) — Q16 pins
   them; this errata deliberately avoids a version bump, errata annotated in-row.
+
+> **Predicate note [DP-R2a post-review]:** per ChatGPT round-2 finding 4b, the harness Q22 predicate was extended to check T-20 explicitly (\`"T-20" in mtx\` + \`"| T-20 |" in req\`) — T-20 confirmed present at REQ §4 line 275 and §5 rows; re-run 27 PASS / 0 FAIL (gate-run-r2a-final.txt).

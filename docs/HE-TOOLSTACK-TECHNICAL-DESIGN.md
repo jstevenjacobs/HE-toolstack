@@ -1148,11 +1148,16 @@ exclusion. The mechanism now:
      a crash mid-section is recoverable, not corrupting).
   3. **Lock-file location/permissions:** `workflows/tickets/.locks/` (same ext4 owner/D-05
      root, dir 0755 / file 0644, single HE user [A2]).
-  4. **Process-crash behavior:** flock is bound to the fd and **released by the kernel on
-     process death** (any exit or signal, **including SIGKILL and container kill — the kernel
-     closes every fd as it reaps the process; the surviving lock *file* is inert because the
-     lock is on the fd, not the path**). No unlink protocol, no stale-lock sweep, no
-     delete/recreate race — a leftover lock *file* with a dead holder is simply unlocked.
+  4. **Process-crash behavior:** flock is bound to the **open file description**, not the
+     pathname, and is released by the kernel when the **last fd referencing that file
+     description closes** — process death closes that process's fds, so any exit or signal
+     **including SIGKILL and container kill** releases the lock as the kernel reaps each
+     process. Caveat stated explicitly [DP-R2a 2026-11-23 clarification]: an fd **inherited
+     via fork/exec or duplicated to another process keeps the lock alive after the original
+     holder dies** — hence the claim process stays single-process (§8.8 claim model) and
+     **must not leak the lock fd across fork+exec**; T-20's crash leg includes this
+     inheritance check. No unlink protocol, no stale-lock sweep, no delete/recreate race —
+     a leftover lock *file* with no live fd is simply unlocked.
   5. **Heartbeat/expiry:** holder rewrites `heartbeat_at` every 60 s [P,
      `HE_HEARTBEAT_SEC`]; a claim is *stale* when `heartbeat_at` older than
      `HE_CLAIM_STALE_MIN` (default 30 min [P]) **and** no holder currently has the lock
