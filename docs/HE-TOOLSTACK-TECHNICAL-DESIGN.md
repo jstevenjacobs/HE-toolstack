@@ -1151,7 +1151,7 @@ exclusion. The mechanism now:
   4. **Process-crash behavior:** flock is bound to the **open file description**, not the
      pathname, and is released by the kernel when the **last fd referencing that file
      description closes** — process death closes that process's fds, so any exit or signal
-     **including SIGKILL and container kill** releases the lock as the kernel reaps each
+     **including SIGKILL and container kill** releases the lock as the kernel tears down the
      process. Caveat stated explicitly [DP-R2a 2026-11-23 clarification]: an fd **inherited
      via fork/exec or duplicated to another process keeps the lock alive after the original
      holder dies** — hence the claim process stays single-process (§8.8 claim model) and
