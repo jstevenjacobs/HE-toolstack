@@ -1,0 +1,28 @@
+Q1 PASS — 19 numbered H2 sections
+Q2 PASS — 9 mermaid blocks in TD
+Q4 PASS — 66 reqs covered; missing=[]
+Q5 PASS — 24 matrix refs, 24 defs, undefined=[]
+Q6 PASS — 17 ADR records; dangling=[]
+Q7 PASS — TD=['OQ-1', 'OQ-2', 'OQ-3', 'OQ-4', 'OQ-5', 'OQ-6', 'OQ-7'] ADR=['OQ-1', 'OQ-2', 'OQ-3', 'OQ-4', 'OQ-5', 'OQ-6', 'OQ-7', 'OQ-8', 'OQ-9']
+Q8 PASS — max assumption A15
+Q9 PASS — uncontextualized flags=[]
+Q10 PASS — honesty statement in TD
+Q11 PASS — 138 evidence tags in TD
+Q12 PASS — 2 cited shas exist; bad=[]
+Q13 PASS — OneDrive root canonical; stale-dest-mentions=[]
+Q14 PASS — stale sidecar tokens=[]; §6.2b in ADR
+Q15 PASS — 0 stray T-rows in §3
+Q16 PASS — stale-coherence: 0 hits (counts+versions+superseded+backup+schema coherent)
+Q17 PASS — dangling §refs=[]
+Q18 PASS — claim arbiter = flock(r3) everywhere; no rename-CAS/O_EXCL/§9.2a/lease_ttl residue
+Q19 PASS — hdi-refusal residue=[]; retraction in REQ+ADR
+Q20 PASS — WAL fairness corrected in TD
+Q21 PASS — make down + run-label present
+Q22 PASS — T-20..T-23 defined+matrixed
+Q23 PASS — r3 ownership coherence: no toolserver queue-UPDATE grant; flock claim; §8.4b + submissions present
+Q24 PASS — r5 backup coherence: no live cross-FS-atomic-rename or mc-mirror-history claim; --allow-active only with withdrawal ctx; NFR-22 no while-jobs-run; §6.9.1 quiesce-and-wait + §9.6 + L4/L5 honesty + OQ-8/OQ-9 present
+Q25 PASS — r6+r8 rulings recorded: D-15 OptD + D-16 OptB + D-08/A1 Accepted; D-02 Accepted as written (OQ-1 RULED/CLOSED 2026-11-17 in ADR + TD mirror); ADR OQ-5/6/7 CLOSED, OQ-9 RULED, OQ-8 CONFIRMED; no stale pending markers in TD
+Q26 PASS — r7 network coherence: TS_BIND=0.0.0.0 in-container + explicit zero host publication; T-15 six-leg matrix in TD §5.4b; no normative gateway/hdi success URL; client URL http://toolserver:8100 in TD+REQ
+Q27 PASS — r9 lifecycle coherence: canonical labels he-stack=1/he-run/he-job-id (TD+REQ); six-step make down with host-side final sweep + no-already-stopped-engine rule; class-X exclusion in TD + NFR-01; class-C core-5 enumeration (TD+ADR, no '(6 services'); diagrams free of superseded A/B/X, docker.sock-ALTERNATIVE, OQ-5-open and engine-direct-spawn
+Q28 PASS — r10 API-contract coherence: three canonical health endpoints in REQ+TD+ADR with `/health` retired; POST /jobs example exactly {job_id, queue_pos} + REQ 201 Created; no engine-facing reap op; six-scenario health table incl. promotion-delayed-never-failed + four-state ladder; Idempotent-Replay wording TD+REQ; §6.2b cross-cutting rows + root-equivalent caveat; D-16 status ACCEPTED per operator ruling (r6; conflict with r10 brief RULED by operator 2026-11-17, resolution recorded in ADR-D-16 A1)
+TOTAL: 27 FAILS: 0

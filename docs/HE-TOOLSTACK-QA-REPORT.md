@@ -35,7 +35,7 @@ Q4–Q28; Q3 = external mermaid 12.3.0 parse, run separately, 9/9 blocks OK).**
 | Q19 | Network-fact consistency [r2 item 1]: no doc still claims `host.docker.internal` is refused from containers; explicit retraction present in REQ + ADR | **PASS** | 0 "does not traverse" claims in REQ/TD/ADR; "retracted" present in both REQ NFR-07 area and ADR-D-15 Consequences |
 | Q20 | WAL wording [r2 item 4 / r3]: TD states WAL admits **one committer db-wide** with **no fairness guarantee**; ownership is convention, not DB enforcement; r3: no doc gives the toolserver a queue UPDATE any more (grep-verified; toolserver write path = INSERT `submissions` only) | **PASS** | "no fairness guarantee" present in TD §8.4 area |
 | Q21 | Lifecycle labels [r2 item 3]: REQ NFR-01 canonical lifecycle names `make down`; TD run-label `he-run` present | **PASS** | both strings grep-verified |
-| Q22 | Tests T-20 (flock claim race — ≥2 processes, exactly one winner, crash+retry), T-21 (stale-claim supersede/expiry), T-22 (MinIO version-history sufficiency through staging), T-23 (SQLite submission-inbox concurrency + crash matrix) are
+| Q22 | Tests T-20 (flock claim race — ≥2 processes, exactly one winner, crash+retry), T-21 (stale-claim supersede/expiry), T-22 (MinIO version-history sufficiency through staging), T-23 (SQLite submission-inbox concurrency + crash matrix) are defined in REQ §4 **and** rowed in the §5 matrix | **PASS** | defined + matrixed; network reachability proof remains T-17 (from-container probe). **[DP-R2a 2026-11-23 row repair:** this row was truncated on disk from its r3 filing through main `4b0838c`; the missing completion is reconstructed from the intact r2-era row (`3feb698`) plus the `gates_v13.py` Q22 predicate, and the predicate re-ran green against main @ `4b0838c` (27 PASS / 0 FAIL, 2026-11-23). See `workflows/adviser-input/round-02/` evidence.] |
 | Q23 | Claim/ownership coherence [r3]: no Toolserver queue-`UPDATE` grant remains in TD; §8.8 claim protocol = flock held lock (no rename-as-lock claim in normative text); §8.4b ownership table + submissions inbox present in TD and mirrored in ADR-D-08 A1 | **PASS** | gates_v13 Q23 |
 | Q24 | **Backup coherence [r5]:** (a) no live normative text asserts cross-filesystem atomic rename to the OneDrive root or `mc mirror` version-history preservation (history/withdrawn mentions allowed); (b) `--allow-active` appears ONLY beside withdrawn/negative language; (c) T-11 no longer affirmatively requires backup-while-jobs-run; (d) quiesce-and-wait §6.9.1, restore spec §9.6, L1–L5 ladder §6.9.4, ADR OQ-8 and OQ-9 all exist; (e) `DONE.json` never described as upload proof in normative text | **PASS** | gates_v13 Q24 (added this pass) |
 | Q25 | **Decision-integrity [r6]:** 2026-11-16 operator rulings recorded coherently — ADR D-15 Accepted (Option D he-agent net), D-16 Accepted (Option B sidecar), D-08+A1 Accepted; ADR OQ-5/OQ-6/OQ-7 carry RULED+CLOSED markers, OQ-9 RULED (Option A ritual), OQ-8 CONFIRMED contingent; TD shows zero stale pending/awaiting markers; TD §17.1 mirror rows updated | **PASS** | gates_v13 Q25 (added this pass) |
@@ -100,5 +100,8 @@ Every PASS in this report belongs to exactly one class:
 
 **Command (author-side, for the record):** `python3 .hermes-tmp/gates_v13.py` from the repo
 root prints one line per gate + `TOTAL/FAILS`; exit-agnostic by design. Re-run points at the
-current HEAD at each round; results above are the r12 tree (`T-24` present, REQ v1.10,
-TD v1.13, QA v2.3).
+current HEAD at each round; results above are the r12/r13 tree (`T-24` present, REQ v1.10,
+TD v1.13, QA v2.3). **[DP-R2a 2026-11-23: suite re-run against main @ `4b0838c` — 27 PASS /
+0 FAIL (Q22 row repaired same commit; harness path-adapted copy, gate logic byte-identical);
+full run log: `workflows/adviser-input/round-02/gate-run-main-4b0838c.txt`. Harness location
+decision (R-09/FINDING-08) still open — due at M0 start, see plan P2c.]**
