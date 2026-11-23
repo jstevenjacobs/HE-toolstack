@@ -1149,7 +1149,9 @@ exclusion. The mechanism now:
   3. **Lock-file location/permissions:** `workflows/tickets/.locks/` (same ext4 owner/D-05
      root, dir 0755 / file 0644, single HE user [A2]).
   4. **Process-crash behavior:** flock is bound to the fd and **released by the kernel on
-     process death** (any exit or signal). No unlink protocol, no stale-lock sweep, no
+     process death** (any exit or signal, **including SIGKILL and container kill — the kernel
+     closes every fd as it reaps the process; the surviving lock *file* is inert because the
+     lock is on the fd, not the path**). No unlink protocol, no stale-lock sweep, no
      delete/recreate race — a leftover lock *file* with a dead holder is simply unlocked.
   5. **Heartbeat/expiry:** holder rewrites `heartbeat_at` every 60 s [P,
      `HE_HEARTBEAT_SEC`]; a claim is *stale* when `heartbeat_at` older than

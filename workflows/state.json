@@ -1,7 +1,7 @@
 {
  "project": "HE-toolstack Phase 2 - Documentation production",
  "phase": 2,
- "cursor": "DP-R1a: PR #12 OPEN awaiting council review; R1b prompt files ready for human to carry to ChatGPT/Grok/Gemini; adviser replies go verbatim to workflows/adviser-input/",
+ "cursor": "R2a (branch dp/round-02-freeze): freeze repairs drafted & harness-verified 27/0 (Q22 row + QA footer + TD sec8.8 flock clause; no version bumps - Q16 pins them, operator confirmed 2026-11-23). Next: push, open R2 PR, adviser prompts pinned to merge SHA raw-URLs. R2b = D-06 wrapper-shape ruling (operator decision, evidence CD-010..013 banked). R2c = QA harness location (scripts/qa/ recommended, operator call).",
  "completed": [
   "P2.0",
   "P2.1",
@@ -11,8 +11,9 @@
   "P2.5"
  ],
  "tickets_open": [
-  "DP-R1a (branch+PR: commit DP0 + planning plan)",
-  "DP-R1b (council design review, blocked on R1a merge)"
+  "DP-R2a (freeze repairs: drafted, awaiting commit+PR)",
+  "DP-R2b (D-06 ruling)",
+  "DP-R2c (harness location)"
  ],
  "updated": "2026-11-23T14:50:59+00:00",
  "done_checks": {
