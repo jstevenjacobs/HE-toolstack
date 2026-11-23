@@ -20,6 +20,9 @@
 - Advisers are information sources, not just judges: prompts ask for specific guidance against named alternatives (§3 format), never open-ended "please review".
 - Model-internal knowledge may propose, but may never be the sole basis recorded for a technical claim.
 
+**L4 — Dependency-contract verification (adopted round 1, ChatGPT finding 5).**
+- Before claiming any ticket, enumerate its upstream dependencies and verify each one's actual committed implementation, acceptance evidence, and relevant ADR/REQ contract. A ticket may not claim an upstream dependency satisfied solely because the ledger says CLOSED; any mismatch is a blocking discrepancy recorded before implementation begins. Counters cross-ticket architectural drift — the failure mode the 1-turn-per-ticket regime itself creates. Recorded as a mandatory preflight section in every ticket's Result.
+
 **L3 — Cleanliness (transient-artifact lesson).**
 - Any file written outside the repo goes into `/opt/data/cache/scratch/` AND is appended to `workflows/scratch-manifest.txt` the same turn; each round's CLOSE step deletes its registered scratch items. No unregistered orphans.
 - Containers/volumes: the planning phase runs none (docs-only rule). When execution starts, cleanup is governed by C3 (orphan teardown), C5 (prune cron), and the six-step `make down` — no ad-hoc `docker rm`.
@@ -48,7 +51,7 @@ tags: dp-phase1-frozen, ...   ← milestones on main after each phase merge
 | Phase | Rounds | Content | Exit gate |
 |---|---|---|---|
 | **P1 — Council final design review + commit pending** | R1a, R1b | see §4 | PR merged to main; tag `dp-phase1-frozen`; DP0 committed |
-| **P2 — Freeze repairs + build-readiness rulings** | R2a repairs (Q22 row, RR App. I OQ-4 row, QA footer); R2b D-06 wrapper-shape decision (adviser prompts + operator ruling); R2c QA-harness promotion decision | DP0 R-05/R-09/R-10 closed on main |
+| **P2 — Freeze repairs + build-readiness rulings** | R2a repairs (Q22 row, RR App. I OQ-4 row, QA footer); R2b D-06 wrapper-shape decision (adviser prompts + operator ruling); R2c QA-harness promotion decision. **Clarified in R1b (ChatGPT finding 3): a register GO-for-Pass-C is permission to execute C1–C5 only — never M0 build authorization and never a substitute for P2 closure. P2 closes before the first `make up`/T0.x build is authorized.** | DP0 R-05/R-09/R-10 closed on main |
 | **P3 — Pass-C execution plan** | R3a adviser review of C1–C5 (already drafted); R3b incorporate + host-state preflight facts refreshed; R3c commit to main as `tickets/` (not candidates) | Pass-C tickets normative; execution claimable |
 | **P4 — Pass-0/M0 plan** | R4a T0.1–T0.6 adviser review; R4b make-verify chain + T-test matrix (already extracted) review; R4c revisions + commit | M0 plan normative; `make up` authorized per DP0 hard-gate table |
 | **P5 — Pass A/B + drills scheduling** | R5a Pass-A/B scope review; R5b drill calendar (T-11/T-18/T-22, OneDrive L4/L5, host-reboot); R5c commit | Full roadmap on main, every future execution ticket has a home |
@@ -68,9 +71,10 @@ ALTERNATIVES (where a choice is asked: list options A/B/C with trade-offs — ad
 ANSWER FORMAT: per question APPROVE | CHANGES: <specific> | VETO: <reason>; plus one "what we did not ask but should have" line
 ```
 
-- Role defaults (flexible; operator may reassign): **ChatGPT** — reasoning, option analysis, decision-shape critique; **Grok** — adversarial review + external verification (asks it to check claims against live sources — feeds L2); **Gemini** — long-context cross-document coherence (it can hold whole TD/REQ in its window where my 81 k cannot — this turns my hardest constraint into the council's complementarity).
+- Council amended 2026-11-23 (operator decision): **Gemini removed** (no GitHub access). Council = Hermes + ChatGPT + Grok. Gemini's whole-document coherence sweep is reassigned to ChatGPT in future rounds. Adviser prompts must carry raw-file URLs (`raw.githubusercontent.com/<repo>/<full-sha>/<path>`, pinned to a commit SHA) — retriever-based advisers fetch these directly.
+- Role defaults (flexible; operator may reassign): **ChatGPT** — reasoning, option analysis, decision-shape critique + whole-doc coherence (from round 1); **Grok** — adversarial review + external verification (asks it to check claims against live sources — feeds L2).
 - A checkpoint passes only on **written replies collected by the router**; main commits them verbatim, then produces a response-diff round addressing every CHANGES/VETO (disagreement that survives one full round escalates to the operator, not to silent main-agent override).
-- Quorum rule: 2 of 3 adviser replies required; a missing reply is recorded as `no-reply`, never assumed consent.
+- Quorum rule (amended 2026-11-23): with a 2-adviser council, **both** replies required; a missing reply is recorded as `no-reply`, never assumed consent.
 
 ## 4. Phase 1 — detail (the user's proposed first phase, as amended)
 

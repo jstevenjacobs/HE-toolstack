@@ -14,12 +14,14 @@ the D-14-ruled backup root: `/mnt/c/Users/steven/OneDrive/Backup/HE-toolstack/` 
 Import into the app bucket is a **T0.x follow-up**, recorded in the ledger row.
 
 **Done-check (≤3 lines):**
-- [ ] Recursively-counted object count + total bytes staged == source counts captured before removal (per-bucket `mc ls --recursive` counts, both sides, in committed evidence).
+- [ ] Per-object integrity: path→SHA-256 manifest computed on source (via `mc find` + `mc cat | sha256sum`) == manifest on staged copy, object-for-object (counts + byte totals alone are insufficient — R1b adoption); both manifests in committed evidence.
+- [ ] OneDrive durability read-back for `pd-minio-orphan/` completed and logged to `drills/onedrive-readback.log` (or an initialed operator purge-approval ledger row) BEFORE the volume-removal step runs (R-04 hard sub-gate, R1b).
 - [ ] `docker ps -a | grep -c minio` == 0 on host afterwards (zero count includes the `infra` container AND its volume gone via `docker volume ls`); the D-14 root staging dir holds the copy.
 - [ ] Cognee green after teardown: `cognee_api`, `cognee_postgres`, `cognee_ui` all `Up (healthy)` — same three containers, same compose project `cognee`, before and after.
 
 **Preconditions:**
 - Operator approval to remove the orphan (this ticket deletes containers/volumes — one-time destructive step, pre-ruled in DEPLOY-v2 §7 item 3 but re-confirm at claim).
+- Step 3b durability read-back (or purge-approval) is a hard precondition of step 5 (R-04 as reclassified in R1b): never reach volume-removal on a merely-local copy.
 - `mc` (or the MinIO container's own client) available on host; credentials readable from `/home/steven/PD-toolstack/infra/minio-compose.yml`.
 - Cognee state snapshot baseline captured (`docker ps` + healthcheck output) BEFORE any infra action.
 
@@ -27,8 +29,10 @@ Import into the app bucket is a **T0.x follow-up**, recorded in the ledger row.
 1. Baseline probe, no mutation: `docker inspect infra-minio-1` compose labels (project/config path — must match the §7 config path), `docker volume ls` for the `infra` volume, per-bucket recursive object count + bytes via `mc ls --recursive`/`du`. *Check: probe output committed as `evidence` below; config path in labels == `/home/steven/PD-toolstack/infra/minio-compose.yml` or STOP (wrong orphan).*
 2. Cognee baseline: names/status/health of the three `cognee`-project containers. *Check: all healthy; captured for later diff.*
 3. Copy bucket contents to `/mnt/c/Users/steven/OneDrive/Backup/HE-toolstack/pd-minio-orphan/` (copy, never move — D-01 consequence wording). *Check: re-count staged objects + bytes; equals step-1 counts exactly.*
+3a. Content-integrity verify (R1b adoption): per-object SHA-256 manifest on source vs staged (`mc find` iteration; large objects streamed). *Check: manifests identical path-for-path; any mismatch = STOP, ledger `blocked` — a same-size replacement passes count/bytes but fails here.*
+3b. Durability gate (R-04 hard sub-gate): OneDrive web read-back confirms `pd-minio-orphan/` visible off-host with matching file count; append dated entry to `drills/onedrive-readback.log`, or record an initialed operator purge-approval ledger row. *Check: read-back log entry or purge-approval row exists before step 5 runs. Syncing is not proven (OQ-9); local copy ≠ durable copy.*
 4. `docker compose -f /home/steven/PD-toolstack/infra/minio-compose.yml down` (project `infra` only; never a name-matched `docker rm`). *Check: `docker ps -a --filter label=com.docker.compose.project=infra -q` empty.*
-5. Remove the orphan volume (`docker volume rm infra_<volume>` as named in step 1) + the config file path stays on disk (it is PD-toolstack-frozen content; C4's tarball captures it). *Check: `docker volume ls | grep -c infra` == 0.*
+5. Remove the orphan volume — ONLY if step 3b passed (`docker volume rm infra_<volume>` as named in step 1) + the config file path stays on disk (it is PD-toolstack-frozen content; C4's tarball captures it). *Check: `docker volume ls | grep -c infra` == 0.*
 6. Cognee diff + final gate: re-list the three cognee containers, compare to step-2 baseline; run `docker ps -a | grep -c minio`. *Check: identical container set + all healthy; grep count == 0.*
 7. Append ledger row with `ref:` to D-01 A1 consequences + §7 item 3 and the T0.x import follow-up. *Check: `tail -1 workflows/ledger.md`.*
 
