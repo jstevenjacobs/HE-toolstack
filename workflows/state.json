@@ -1,25 +1,29 @@
 {
-  "project": "HE-toolstack Phase 2 - Documentation production",
-  "phase": 2,
-  "cursor": "P2.5-done (rev D-14 applied 2026-11-15)",
-  "completed": [
-    "P2.0",
-    "P2.1",
-    "P2.2",
-    "P2.3",
-    "P2.4",
-    "P2.5"
-  ],
-  "tickets_open": [],
-  "updated": "2026-11-14T17:30:00-06:00",
-  "done_checks": {
-    "P2.1": "63 req IDs each w/ verification method + acceptance criteria; matrix refs all resolve; committed+pushed @0ed664b",
-    "P2.2": "every Phase 1 ruling D-01..D-12 has an ADR w/ options+consequences+evidence tags; rejected/deferred/unresolved sections; committed+pushed @517e39d",
-    "P2.3": "19/19 sections, 8/8 mermaid diagrams, 0 dangling IDs across TD/REQ/ADR, fences balanced; internal-consistency QA pass @f44c294",
-    "P2.4": "DESIGN-REVIEW.md v1.0: 54-item checklist + findings register FINDING-01..07 + sign-off grid; author pass w/ 2 real defects found+fixed",
-    "P2.5": "QA-REPORT.md v1.0: 12/12 automated gates PASS (re-run at HEAD); manual pass + stated limits; FINDING-08 filed",
-    "D-14": "Canonical backup root /mnt/c/Users/steven/OneDrive/Backup/HE-toolstack propagated: NFR-22, ADR-D-14(Accepted), TD sec 6.9/9.4/12.2/D8/R-4/R-8/BACKUP_ROOT, REQ v1.1, ADR v1.1, QA Q13, diagrams 8/8"
-  },
-  "notes": "Phase 1 gate cleared at 141249d (D-04=B, D-05=1, D-10=separate all Accepted). P2.0 = ticket registration (this file's creation). Deliverable order follows dependency: REQUIREMENTS -> ADR -> TECHNICAL-DESIGN -> DESIGN-REVIEW -> QA report. Each ticket: <=3-line done-check verified same session, ledger row with ref: per non-trivial decision.",
-  "phase2_status": "ALL PHASE 2 TICKETS COMPLETE - docs set ready for reviewer sign-off (REVIEW sec 9)"
+ "project": "HE-toolstack Phase 2 - Documentation production",
+ "phase": 2,
+ "cursor": "DP-R1a: PR #12 OPEN awaiting council review; R1b prompt files ready for human to carry to ChatGPT/Grok/Gemini; adviser replies go verbatim to workflows/adviser-input/",
+ "completed": [
+  "P2.0",
+  "P2.1",
+  "P2.2",
+  "P2.3",
+  "P2.4",
+  "P2.5"
+ ],
+ "tickets_open": [
+  "DP-R1a (branch+PR: commit DP0 + planning plan)",
+  "DP-R1b (council design review, blocked on R1a merge)"
+ ],
+ "updated": "2026-11-23T14:50:59+00:00",
+ "done_checks": {
+  "P2.1": "63 req IDs each w/ verification method + acceptance criteria; matrix refs all resolve; committed+pushed @0ed664b",
+  "P2.2": "every Phase 1 ruling D-01..D-12 has an ADR w/ options+consequences+evidence tags; rejected/deferred/unresolved sections; committed+pushed @517e39d",
+  "P2.3": "19/19 sections, 8/8 mermaid diagrams, 0 dangling IDs across TD/REQ/ADR, fences balanced; internal-consistency QA pass @f44c294",
+  "P2.4": "DESIGN-REVIEW.md v1.0: 54-item checklist + findings register FINDING-01..07 + sign-off grid; author pass w/ 2 real defects found+fixed",
+  "P2.5": "QA-REPORT.md v1.0: 12/12 automated gates PASS (re-run at HEAD); manual pass + stated limits; FINDING-08 filed",
+  "D-14": "Canonical backup root /mnt/c/Users/steven/OneDrive/Backup/HE-toolstack propagated: NFR-22, ADR-D-14(Accepted), TD sec 6.9/9.4/12.2/D8/R-4/R-8/BACKUP_ROOT, REQ v1.1, ADR v1.1, QA Q13, diagrams 8/8"
+ },
+ "notes": "Phase 1 gate cleared at 141249d (D-04=B, D-05=1, D-10=separate all Accepted). P2.0 = ticket registration (this file's creation). Deliverable order follows dependency: REQUIREMENTS -> ADR -> TECHNICAL-DESIGN -> DESIGN-REVIEW -> QA report. Each ticket: <=3-line done-check verified same session, ledger row with ref: per non-trivial decision.",
+ "phase2_status": "ALL PHASE 2 TICKETS COMPLETE - docs set ready for reviewer sign-off (REVIEW sec 9)",
+ "notes_dp0": "Packaging turn 2026-11-22: no compose/docker/runtime command executed; no Pass-C or M0 ticket claimed. First make-up blocked until DP0 Hard items R-05/R-09/R-10 close and R-01 interim row initialed; Pass-C start itself cleared per register recommendation."
 }
