@@ -1,7 +1,7 @@
 {
   "project": "HE-toolstack Phase 2 - Documentation production",
   "phase": 2,
-  "cursor": "PR #14 ready to merge: R3c harness in-repo + R3b D-06 ruling A applied (OQ-4 CLOSED), council 2/2, gates 27/0 post-ruling. Awaiting operator merge instruction (PR #12/#13 precedent).",
+  "cursor": "R2 CLOSED (DP-R3-CLOSE). main at tag dp-phase3-harness-in-repo after PR #14 squash-merge. Remaining M0-freeze blockers human-only (T-01..T-24, DR 2b + QA 5 sign-offs, OQ-9, F-1 deferred). HARD STOP: implementation/deploy/ticket execution await explicit operator instruction.",
   "completed": [
     "P2.0",
     "P2.1",
