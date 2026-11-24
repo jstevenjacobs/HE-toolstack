@@ -1,7 +1,7 @@
 {
  "project": "HE-toolstack Phase 2 - Documentation production",
  "phase": 2,
- "cursor": "PR #13 (dp/round-02-freeze @ 4bcdbc4): council round-2 QUORUM MET (Grok APPROVE, ChatGPT APPROVE-WITH-CHANGES); all 4 ChatGPT merge-gating changes adopted (CD-R2-004..007) + PR comment posted asking both advisers to confirm close-out on 4bcdbc4. On confirm: squash-merge, delete branch, tag dp-phase2-freeze-repaired. R2b = D-06 operator ruling (open). R2c = harness location (open, scripts/qa/ recommended; both advisers flagged untracked-harness reproducibility).",
+ "cursor": "Round-03: R2c DONE in-repo (scripts/qa/gates_v13 -> gates_v13.py tracked, PR #14). R2b OPEN: awaiting operator D-06 ruling per workflows/adviser-input/round-03/d06-ruling-brief.md (Option A recommended). On ruling: ADR status line + OQ-4 CLOSED + R-05 + ledger, next PR.",
  "completed": [
   "P2.0",
   "P2.1",
@@ -11,9 +11,8 @@
   "P2.5"
  ],
  "tickets_open": [
-  "DP-R2a-close (awaiting adviser close-out confirm, then merge PR #13)",
-  "DP-R2b (D-06 ruling)",
-  "DP-R2c (harness location)"
+  "DP-R2b (D-06 operator ruling - brief ready)",
+  "DP-R3-merge (PR #14 council review)"
  ],
  "updated": "2026-11-23T14:50:59+00:00",
  "done_checks": {
