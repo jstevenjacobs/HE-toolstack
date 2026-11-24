@@ -82,7 +82,9 @@ not authoritative-destination claims.
 
 | ID | Action | Owner | Gate |
 |----|--------|-------|------|
-| FINDING-08 | Promote QA gate script into repo `scripts/qa/` for repeatable CI-style checks | author | M0 start |
+| FINDING-08 | Promote QA gate script into repo `scripts/qa/` for repeatable CI-style checks — **RESOLVED 2026-11-23 [DP-R3c]: suite tracked at `scripts/qa/gates_v13.py` (repo-relative, portable); historical round-2 logs remain recorded evidence.** | author | M0 start |
+| R3f-1 (ChatGPT r3) | Q12 cited-SHA check needs full-history clone (`git cat-file` fails on shallow); document requirement or fetch missing commits. Pre-existing, not a port regression. | harness maintainer | next harness revision |
+| R3f-2 (ChatGPT r3) | Q18 `"O_CREAT\|O_EXCL" not in req` tests the exact literal, not each token independently — weak residual detection. Pre-existing, not a port regression. | harness maintainer | next harness revision |
 | (from REVIEW §8) | C6 GPU re-measure ticket (FINDING-04) | Steven/OQ-2 | before GPU class enablement |
 | (from REVIEW §9) | Independent reviewer sign-off ×3 | reviewers | design freeze |
 

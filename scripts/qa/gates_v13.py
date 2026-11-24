@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""gates_v13.py - documentation-integrity gate suite (27 gates, Q1..Q27).
+"""gates_v13.py - documentation-integrity gate suite (27 gates: Q1, Q2, Q4-Q28 - Q3 (external mermaid parse) runs outside this Python harness; see QA-REPORT header).
 
 Ported into the repository under R2c (DP round-03) so the suite is tracked,
 reviewable, and executable by any party from a clean clone - the reproducibility

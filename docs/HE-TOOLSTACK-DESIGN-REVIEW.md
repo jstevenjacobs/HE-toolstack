@@ -186,9 +186,11 @@ issue reconciliation, diff scope). Verdict: **APPROVE WITH EXCEPTIONS**.
   (§2b) and QA §5 diagram sign-offs unclaimed (human-only); T-01…T-24 specified-only,
   zero executed (design freeze gated on M0 evidence); OneDrive off-host durability has no
   L4/L5 proof (OQ-9 contingent); no authN/Z beyond `he-agent` group membership (F-1
-  deferred; compromised spawn-sidecar = root-equivalent); D-06/D-07/D-11/D-17/D-18 remain
-  **Proposed** — must not drift into assumed-accepted during M0; QA harness is
-  gitignored, so 27/27 is author-reproducible only, not independently reproducible.
+  deferred; compromised spawn-sidecar = root-equivalent); D-07/D-11/D-17/D-18 remain
+  **Proposed** — must not drift into assumed-accepted during M0 (D-06 CLOSED by
+  operator ruling 2026-11-23 [DP-R3b], Option A as written); QA harness is now
+  tracked at `scripts/qa/gates_v13.py` (R3c), so 27/27 is independently
+  reproducible from a full-history clone — round-2 logs remain recorded evidence.
 
 This section records an **independent automated reviewer**, not the human sign-offs the §9
 grid requires; the 🧑 rows still block design freeze.
