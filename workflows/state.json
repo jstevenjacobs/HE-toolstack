@@ -1,7 +1,7 @@
 {
  "project": "HE-toolstack Phase 2 - Documentation production",
  "phase": 2,
- "cursor": "Round-03: R2c DONE in-repo (scripts/qa/gates_v13 -> gates_v13.py tracked, PR #14). R2b OPEN: awaiting operator D-06 ruling per workflows/adviser-input/round-03/d06-ruling-brief.md (Option A recommended). On ruling: ADR status line + OQ-4 CLOSED + R-05 + ledger, next PR.",
+ "cursor": "PR #14 (dp/round-03-harness) at 81c6cb0c501fca356821d08fdcd29bfcd3ce4543, awaiting council round-03 replies (prompts pinned d5523d6 = same tree for reviewed files). R2b OPEN: operator D-06 ruling per workflows/adviser-input/round-03/d06-ruling-brief.md (Option A recommended).",
  "completed": [
   "P2.0",
   "P2.1",
