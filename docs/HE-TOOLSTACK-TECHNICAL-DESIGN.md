@@ -64,7 +64,7 @@ acceptance artifact); host-disk SPOF (versioned MinIO tier is the copy); phantom
 recurrence (every §6 component lists its *existing* code lineage or is marked [P]).
 
 **Readiness.** Architecture is review-ready: requirements baselined (v1.3: 66 IDs, 100%
-trace-mapped), 17 ADR records (11 Accepted after the 2026-11-16/17 operator rulings — D-15 Option D, D-16 Option B, D-08+Amendment A1, **D-02 as written (OQ-1 closed 2026-11-17)**, plus earlier rulings D-01/D-03/D-04/D-05/D-09/D-12/D-14; D-06/D-07/D-11/D-17/D-18 remain Proposed),
+trace-mapped), 17 ADR records (12 Accepted after the 2026-11-16/17/23 operator rulings — D-15 Option D, D-16 Option B, D-08+Amendment A1, **D-02 as written (OQ-1 closed 2026-11-17)**, **D-06 Option A as written (OQ-4 closed 2026-11-23)**, plus earlier rulings D-01/D-03/D-04/D-05/D-09/D-12/D-14; D-07/D-11/D-17/D-18 remain Proposed),
 open questions surfaced (OQ-1…7). No milestone's acceptance depends on an unverified premise.
 
 ---
@@ -1682,7 +1682,7 @@ verified before any M3 planning session, same discipline as C6.
 | OQ-1 | **RULED 2026-11-17 — CLOSED: operator accepted ADR-D-02 as written ("OQ-1 accepted as written") — files-first + ~200-line runner + tripwires stands.** | wrong-layer complexity if wrong | ~~reviewer~~ operator | ~~design freeze~~ satisfied |
 | OQ-2 | GPU VRAM ceiling/floor final values (D-04 defaults 8/5.5 GiB) + C6 re-measure ticket execution | gates `GPU_CLASS_ENABLED`; numbers are safety margins for co-resident LLM services | operator (Steven) w/ measured nvidia-smi data | before GPU profile activates; **not** blocking M0–M2 (FR-19) |
 | OQ-3 | PD-toolstack D-ledger historical import: which candidate rows are worth mining into the registry? | free provenance for sweeps vs migrating attempt-1 cruft | operator + agent triage pass | during M1 (registry live) |
-| OQ-4 | physics-gate endpoint wrapper (D-06) + registry/SQLite colocation (D-08) acceptance. | M0 design freeze | reviewer | design freeze |
+| OQ-4 | physics-gate endpoint wrapper (D-06) + registry/SQLite colocation (D-08) acceptance — **CLOSED: D-08 half ruled 2026-11-16 (ADR-D-08+A1 Accepted); D-06 half ruled 2026-11-23 [DP-R3b] — Option A (as written) Accepted; see ADR OQ-4 row.** | M0 design freeze | operator | CLOSED 2026-11-23 |
 | OR-05 | MinIO Chainguard-hardened rebuild (open ticket [E]) — rebuild at seed-script authoring or leave digest-pinned OSS image? | supply-chain posture of the evidence tier | operator | before promote is load-bearing (M1) |
 | OQ-5 | **Job spawn channel** (§6.2) — **CLOSED 2026-11-16: operator ruled Option B (scoped spawn-sidecar, ADR-D-16 Accepted).** Residual honestly kept: compromised sidecar still root-equivalent | decides the security-critical component; docker.sock = escape-class power in a container | operator (security posture call) | **M0 blocker CLOSED — implementation may build §6.2b** |
 | OQ-6 | toolserver shares SQLite WAL vs engine-internal HTTP (§7.5) — **CLOSED 2026-11-16: operator ACCEPTED ADR-D-08 Amendment A1 (submissions inbox; toolserver INSERT-only); §8.4b/§7.5/§6.1 freeze as written; T-23 acceptance test** | coupling vs one-less-hop | reviewer + operator (ADR-D-08 A1) | design freeze |
