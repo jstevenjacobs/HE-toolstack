@@ -1,7 +1,7 @@
 {
   "project": "HE-toolstack Phase 2 - Documentation production",
   "phase": 2,
-  "cursor": "R4 ADVISORY CLOSED: final recs R-02/R-03/R-04a/R-12 ACCEPTED by operator 2026-11-24; T-11/T-18+NFR-22 read-back pulled into M0 (TD annotated); OQ-9 decision-part closed/evidence-part open. Branch dp/round-04-m0-readiness awaits PR review. HARD STOP: implementation/deploy/ticket execution await explicit operator instruction.",
+  "cursor": "PR #15 OPEN (R4 merge instruction pending). Round-05 OPEN on dp/round-05-signoff-scheme: single-human scheme + ops-walk/crosscheck prompts + owner walk template. Next: operator relays prompts to Grok then ChatGPT; owner walk filled by operator; 9-grid fills on archived transcripts. HARD STOP unchanged.",
   "completed": [
     "P2.0",
     "P2.1",
@@ -14,7 +14,7 @@
     "DP-R2b (D-06 operator ruling - brief ready)",
     "DP-R3-merge (PR #14 council review)"
   ],
-  "updated": "2026-11-24T23:04:17Z",
+  "updated": "2026-11-24T23:54:58Z",
   "done_checks": {
     "P2.1": "63 req IDs each w/ verification method + acceptance criteria; matrix refs all resolve; committed+pushed @0ed664b",
     "P2.2": "every Phase 1 ruling D-01..D-12 has an ADR w/ options+consequences+evidence tags; rejected/deferred/unresolved sections; committed+pushed @517e39d",

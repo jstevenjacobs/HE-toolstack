@@ -182,7 +182,7 @@ issue reconciliation, diff scope). Verdict: **APPROVE WITH EXCEPTIONS**.
   "18 records" → 17 with numbering note; TD §18 filing-time self-assessment reframed as
   v1.2 snapshot (FINDING-08 recurrence); TD §8.2 stale "A1 pending" → ACCEPTED/CLOSED;
   RR status banner + T-01…23 inline note; QA v2.3 sync. Re-gated **27/27 PASS**.
-- **Open exceptions (not doc-fixable — carried into M0):** M1–M10 diagram↔prose checklist
+- **Open exceptions (not doc-fixable — carried into M0):** M1–M10 diagram↔prose checklist [DP-R4 erratum 2026-11-24: checklist is M1–M9 — M10 never existed; register R-02 corrected same date; original preserved]
   (§2b) and QA §5 diagram sign-offs unclaimed (human-only); T-01…T-24 specified-only,
   zero executed (design freeze gated on M0 evidence); OneDrive off-host durability has no
   L4/L5 proof (OQ-9 contingent); no authN/Z beyond `he-agent` group membership (F-1
