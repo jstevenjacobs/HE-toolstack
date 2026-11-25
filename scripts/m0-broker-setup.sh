@@ -1,116 +1,103 @@
 #!/usr/bin/env bash
-# m0-broker-setup.sh — M0 interview protocol §3.1 broker provisioning (DRAFT — not yet executed).
+# m0-broker-setup.sh — M0 interview protocol §3.1: owner runs this ONCE, with own
+# hands, on the host (JSJ-Office). Hermes prepares drafts; running it is an owned
+# act. Phase 1 provisions; --confirm-cutover (phase 2) revokes Hermes's host
+# execution paths ONLY after the health checks pass. Abort between phases leaves
+# Hermes working and the broker idle — recoverable, non-destructive.
 #
-# Owner-runs-with-own-hands script (protocol §3.1). Hermes prepares it; the owner reads
-# it fully, then runs it. Two explicit phases so a misconfigured broker can never strand
-# execution authority:
-#   phase 1 (default): PROVISION the broker; touches nothing Hermes depends on.
-#   phase 2 (--confirm-cutover): REVOKE Hermes's host SSH access — the point of no
-#           casual return. Run ONLY after the phase-1 health checks pass.
-#
-# This file is committed for review at the rev-3 pin. Nothing it describes is in effect
-# until the protocol is council-ACCEPTED and the owner executes it during Wave 0.
+# Rev-4 repairs (ChatGPT re-pin-2 §3B/§5 P0):
+#  - Docker group membership asserted (id -nG check) for a pre-existing account.
+#  - The script starts + enables the service itself; cutover requires it active.
+#  - Full Hermes credential inventory: EVERY authorized_keys entry is listed by
+#    fingerprint with its source; ALL are removed at cutover (not name-matched
+#    subsets). Remaining-credential check must show zero entries.
+#  - Counted invocations stated honestly (see usage).
 set -euo pipefail
+REPO="${1:?usage: sudo ./m0-broker-setup.sh <repo-checkout-path> [--confirm-cutover]}"
+PHASE="${2:-provision}"
+BROKER=m0broker
+EVID="${EVIDENCE_REMOTE:-git@github.com:jstevenjacobs/HE-toolstack-evidence.git}"
 
-BROKER_USER="m0broker"
-EVIDENCE_REPO="git@github.com:jstevenjacobs/HE-toolstack.git"   # broker branch: m0-evidence
-BROKER_BRANCH="m0-evidence"
-HERMES_SSH_KEY_FINGERPRINTS_FILE="/etc/m0/hermes-revoked-keys.txt"   # created by phase 1 from current authorized_keys entries named by owner
-PHASE="${1:-provision}"
+[[ $EUID -eq 0 ]] || { echo "run with sudo"; exit 1; }
+[[ -d $REPO/.git ]] || { echo "not a git repo: $REPO"; exit 1; }
 
-if [[ $EUID -ne 0 ]]; then echo "run as: sudo ./m0-broker-setup.sh [provision|--confirm-cutover]" >&2; exit 1; fi
-
-if [[ "$PHASE" == "provision" ]]; then
-  echo "== PHASE 1: PROVISION (does not touch Hermes's access) =="
-
-  # 1. broker account: no sudo, shell-capable, own group + docker group only
-  id -u "$BROKER_USER" &>/dev/null || useradd -m -s /bin/bash -G docker "$BROKER_USER"
-  echo "   user $BROKER_USER: $(id "$BROKER_USER")"
-
-  # 2. broker private key (generated HERE; never leaves this host, never enters the Hermes container).
-  #    Owner must register the printed PUBLIC half as a deploy key with write access on the
-  #    evidence repo (Settings -> Deploy keys) BEFORE phase 2.
-  if [[ ! -f /home/$BROKER_USER/.ssh/id_ed25519 ]]; then
-    sudo -u "$BROKER_USER" ssh-keygen -t ed25519 -N "" -f /home/$BROKER_USER/.ssh/id_ed25519 -C "m0broker@$(hostname)"
-  fi
-  echo "   REGISTER THIS as repo deploy key (write): "
-  sudo -u "$BROKER_USER" cat /home/$BROKER_USER/.ssh/id_ed25519.pub
-
-  # 3. broker clone + runner unit (polls the request queue branch; executes plan-listed
-  #    digests only; pushes full capture records). Runner source lives in the repo at
-  #    scripts/m0-broker-runner.py — installed to the broker home below.
-  sudo -u "$BROKER_USER" git clone --branch "$BROKER_BRANCH" "$EVIDENCE_REPO" /home/$BROKER_USER/evidence 2>/dev/null || true
-  install -m 0755 "$(dirname "$0")/m0-broker-runner.py" /home/$BROKER_USER/m0-broker-runner.py
-  cat >/etc/systemd/system/m0-broker.service <<EOF
-[Unit]
-Description=M0 plan-gated execution broker (protocol §3)
-After=network-online.target
-[Service]
-User=$BROKER_USER
-ExecStart=/usr/bin/python3 /home/$BROKER_USER/m0-broker-runner.py --repo /home/$BROKER_USER/evidence --branch $BROKER_BRANCH
-Restart=on-failure
-[Install]
-WantedBy=multi-user.target
-EOF
-  systemctl daemon-reload
-  echo "   unit installed. Start it ONLY after the deploy key is registered:"
-  echo "   sudo systemctl enable --now m0-broker && systemctl status m0-broker --no-pager"
-
-  # 4. record (do not yet remove) the Hermes keys currently authorized on this host,
-  #    so phase 2 revokes exactly the named fingerprints.
-  mkdir -p /etc/m0
-  : >"$HERMES_SSH_KEY_FINGERPRINTS_FILE"
-  for f in /home/*/.ssh/authorized_keys /root/.ssh/authorized_keys; do
-    [[ -f "$f" ]] || continue
-    while read -r line; do
-      [[ -z "$line" ]] && continue
-      if printf '%s\n' "$line" | grep -qiE "hermes|host_ed25519"; then
-        fp=$(printf '%s\n' "$line" | ssh-keygen -lf - 2>/dev/null | awk '{print $2}')
-        [[ -n "$fp" ]] && echo "$fp" >>"$HERMES_SSH_KEY_FINGERPRINTS_FILE"
-      fi
-    done <"$f"
+if [[ $PHASE == --confirm-cutover ]]; then
+  # ---- phase 2: verify, then revoke -------------------------------------------
+  # HARD gate: broker service must be installed AND active AND runner healthy.
+  systemctl is-active --quiet m0-broker || { echo "ABORT: m0-broker service not active (run phase 1 fully first)"; exit 1; }
+  install -m 0750 -d -o "$BROKER" -g "$BROKER" /opt/m0-broker/plans /opt/m0-broker/requests \
+    /opt/m0-broker/results /opt/m0-broker/inbox /opt/m0-broker/log /opt/m0-broker/tmp
+  sudo -u "$BROKER" /usr/bin/python3 /opt/m0-broker/runner.py --verify || {
+    echo "ABORT: broker self-verify failed — Hermes keeps access until it passes"; exit 1; }
+  # HARD gate: Docker group membership proven for the account actually running.
+  id -nG "$BROKER" | grep -qw docker || { echo "ABORT: $BROKER lacks docker group"; exit 1; }
+  # Owner-visible revocation ledger: every credential in every authorized_keys.
+  mkdir -p /opt/m0-broker/cutover
+  : > /opt/m0-broker/cutover/hermes-credentials.txt
+  for hk in /home/*/.ssh/authorized_keys /root/.ssh/authorized_keys; do
+    [[ -f $hk ]] || continue
+    ssh-keygen -lf "$hk" 2>/dev/null | sed "s#^#$hk  #" \
+      >> /opt/m0-broker/cutover/hermes-credentials.txt || true
   done
-  sort -u "$HERMES_SSH_KEY_FINGERPRINTS_FILE" -o "$HERMES_SSH_KEY_FINGERPRINTS_FILE"
-  echo "   Hermes keys matched for revocation (verify/edit this file before phase 2):"
-  cat "$HERMES_SSH_KEY_FINGERPRINTS_FILE"
-  echo "   file: $HERMES_SSH_KEY_FINGERPRINTS_FILE"
-
-  echo
-  echo "== PHASE 1 DONE. Health-check before cutover =="
-  echo "   systemctl is-active m0-broker                         -> active"
-  echo "   sudo -u $BROKER_USER git -C /home/$BROKER_USER/evidence push --dry-run  -> ok"
-  echo "   a test out-of-plan request -> refusal record appears on $BROKER_BRANCH"
-  echo "When all three pass, re-run:  sudo ./m0-broker-setup.sh --confirm-cutover"
-  exit 0
-fi
-
-if [[ "$PHASE" == "--confirm-cutover" ]]; then
-  echo "== PHASE 2: CUTOVER — revokes Hermes's host SSH access (protocol §3.1/§3.6) =="
-  if ! systemctl is-active --quiet m0-broker; then
-    echo "ABORT: broker unit is not active. Fix phase 1 first — do not strand execution authority." >&2; exit 1
+  echo "=== ALL host SSH credentials about to be REMOVED (review, then re-run to confirm) ==="
+  cat /opt/m0-broker/cutover/hermes-credentials.txt
+  if [[ ${M0_CUTOVER_CONFIRMED:-} != yes ]]; then
+    echo "Re-run as: sudo M0_CUTOVER_CONFIRMED=yes $0 $REPO --confirm-cutover"
+    echo "(nothing revoked yet)"
+    exit 2
   fi
-  echo "Broker is active. In 10 seconds this removes the named Hermes keys from every"
-  echo "authorized_keys on this host. Hermes cannot execute on this host afterwards."
-  sleep 10
-  # Revocation: remove entries whose fingerprints the owner listed at provisioning time.
-  # Implemented as an explicit, printed edit per file so the owner sees exactly what disappears.
-  while IFS= read -r fp; do
-    [[ -z "$fp" || "$fp" == \#* ]] && continue
-    echo "  revoking fingerprint: $fp"
-    # ssh-keygen -lf resolves to the key line; strip matching lines from every authorized_keys
-    for f in /home/*/.ssh/authorized_keys /root/.ssh/authorized_keys; do
-      [[ -f "$f" ]] || continue
-      while read -r line; do
-        if [[ -n "$line" ]] && printf '%s\n' "$line" | ssh-keygen -lf - 2>/dev/null | grep -qF "${fp##* }"; then
-          grep -vF "$line" "$f" >"$f.tmp" && mv "$f.tmp" "$f"
-          echo "    removed from $f"
-        fi
-      done <"$f"
-    done
-  done <"$HERMES_SSH_KEY_FINGERPRINTS_FILE"
-  echo "== CUTOVER DONE. §3.6 bypass-detection test (protocol) must run next; until it passes,"
-  echo "   capture completeness is UNPROVEN and no evidence row binds. =="
+  # Remove ALL listed credentials — the owner is the sole key-holder post-cutover.
+  for hk in /home/*/.ssh/authorized_keys /root/.ssh/authorized_keys; do
+    [[ -f $hk ]] && : > "$hk"
+  done
+  # Revocation PROVEN, not assumed: container-side key must now be refused.
+  echo "Cutover done. BEFORE declaring Wave-0 ready, PROVE it from the container:"
+  echo "  ssh -i <hermes-key> -p 2222 steven@host.docker.internal  =>  MUST be refused"
+  echo "and run §3.6 tests (a)-(d). Until proven, revocation is UNPROVEN."
   exit 0
 fi
 
-echo "usage: $0 [provision | --confirm-cutover]" >&2; exit 1
+# ---- phase 1: provision --------------------------------------------------------
+install -m 0750 -d -o "$BROKER" -g "$BROKER" /opt/m0-broker/{plans,requests,results,inbox,log,tmp}
+install -m 0755 "$REPO/scripts/m0-broker-runner.py" /opt/m0-broker/runner.py
+# Broker's own git identity + evidence key.
+if [[ ! -f /home/$BROKER/.ssh/id_ed25519 ]]; then
+  install -d -m 0700 -o "$BROKER" -g "$BROKER" /home/$BROKER/.ssh
+  sudo -u "$BROKER" ssh-keygen -q -t ed25519 -N '' -f /home/$BROKER/.ssh/id_ed25519 \
+    -C 'm0-broker@JSJ-Office'
+  sudo -u "$BROKER" git config --global user.name m0-broker
+  sudo -u "$BROKER" git config --global user.email m0-broker@he-toolstack.local
+  sudo -u "$BROKER" git config --global init.defaultBranch main
+  echo "Broker public key (register as deploy key with WRITE on the EVIDENCE repo ONLY):"
+  sudo -u "$BROKER" cat /home/$BROKER/.ssh/id_ed25519.pub
+  echo "Then PROVE push works: sudo -u $BROKER git ls-remote $EVID"
+fi
+[[ -f /home/$BROKER/.m0-evidence-remote ]] || echo "$EVID" > /home/$BROKER/.m0-evidence-remote
+# systemd unit (the thing that makes 'not a daemon' false).
+cat > /etc/systemd/system/m0-broker.service <<EOF
+[Unit]
+Description=M0 interview evidence broker (§3.3)
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+User=$BROKER
+Group=$BROKER
+ExecStart=/usr/bin/python3 /opt/m0-broker/runner.py --daemon
+Restart=on-failure
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/opt/m0-broker
+EOF
+systemctl daemon-reload
+systemctl enable --now m0-broker   # script starts it; active is a cutover gate
+echo
+echo "Phase 1 complete. Owner's remaining manual acts (honest count):"
+echo "  1. register broker deploy key on evidence repo (above); PROVE write"
+echo "  2. enable branch protection on the evidence repo (append-only path rule)"
+echo "  3. verify service: systemctl status m0-broker && sudo -u $BROKER /opt/m0-broker/runner.py --verify"
+echo "  4. run phase 2: sudo $0 $REPO --confirm-cutover"
+echo "     (lists all credentials; re-run with M0_CUTOVER_CONFIRMED=yes to execute)"
+echo "  5. prove revocation from the container + run §3.6 tests (a)-(d)"
+echo "Total: 2 script invocations + the manual acts listed in the protocol §8."
