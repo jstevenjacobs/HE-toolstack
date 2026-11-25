@@ -1,19 +1,9 @@
-# M0 Interview Protocol (Round-07) — rev-2
+# M0 Interview Protocol (Round-07) — rev-3
 
-**Purpose.** Progress through the M0 gate with the human operator contributing only
-judgment, never manual labor. Every mechanical act — typing commands, running drills,
-hashing outputs, drafting evidence — is performed by Hermes or verified by the council.
-The operator's total contribution across all of M0 is: ~20 sentences of authority
-(one per approval/ruling/signature, verbatim), one cold-session paste plus one challenge
-response, and one archive fetch. Nothing typed into a shell, nothing manually assembled.
+**Purpose.** Progress through the M0 gate with the human operator contributing only judgment (plus one owned setup run after cutover, §3.1), never mechanical labor. Every mechanical act — typing commands, running drills, hashing outputs, drafting evidence — runs through the plan-gated broker (§3) or is verified by the council. This protocol is a PROCESS design: it changes no ticket, no gate, no §9 row, no D-number, grants no authorization, and changes no council standard (evidence rules, 2/2 verdicts, three-state discipline, §9 exceptions, DESIGN-REVIEW §10 HARD STOP all unchanged). It defines who does what during M0 execution and what counts as evidence. The operator's total contribution across all of M0 is: ~20 sentences of authority (one per approval/ruling/signature, verbatim), one cold-session paste plus one challenge response, one archive fetch, and one setup script run with the owner's own hands (§3.1). Nothing else typed into a shell, nothing manually assembled.
 
-This protocol is a PROCESS design. It changes no ticket, no gate, no §9 row, no D-number,
-and grants no authorization. It defines who does what during M0 execution and what counts
-as evidence.
-
-**rev-2.** Council round-1 at pin `fd024d8f`: Grok ACCEPT-WITH-CHANGES (amendments 1–4)
-and ChatGPT ACCEPT-WITH-CHANGES (amendments 1–5). All adopted here; source replies in
-`workflows/adviser-input/round-07/`. Rev-2 awaits council re-pin ACCEPT before Wave 0.
+**rev-2.** Council round-1 at pin `fd024d8f`: Grok ACCEPT-WITH-CHANGES (amendments 1–4) and ChatGPT ACCEPT-WITH-CHANGES (amendments 1–5). All adopted; source replies in `workflows/adviser-input/round-07/`.
+**rev-3.** Council round-2 at pin `2951d35`: Grok ACCEPT (amendments 1–4 verified adopted; §3 residual accepted as bounded to the single-operator threat model) + ChatGPT ACCEPT-WITH-CHANGES (Q3: §3 must specify an execution broker + independently controlled capture so Hermes cannot control the evidence boundary, plus a bypass-detection test). Rev-3 implements that design on existing infrastructure: a dedicated m0broker account, plan-gated execution, evidence-repo write separation, §3.6 cutover test — and keeps Grok's limitation statement as §3.8. Nothing else in the protocol changes. Rev-3 goes to council re-verification; both members must ACCEPT the same pin.
 
 **Precedent.** This is the round-05 interview pattern (engineering walk: one line per
 row, transcript pinned, council cross-examined) extended from paper rows to live M0
@@ -23,16 +13,24 @@ weakens it — it only removes keystrokes from the human path.
 ## 1. Roles
 
 - **Owner (the only human):** approvals, risk acceptance, open-decision rulings,
-  sign-offs. Answers in one sentence each. Never executes commands, never assembles
-  evidence, never types into a shell beyond the single cold-session paste (§4) and
-  the single archive fetch (§8).
-- **Hermes (executor/scribe, NOT a trust root):** runs every command, writes every
-  artifact, commits all evidence, conducts the interview. Hermes's evidence is only as
-  good as the independent capture (§3) plus council validation (§6).
+  sign-offs. Answers in one sentence each. Runs the one-time broker setup script with
+  own hands (§3.1 — the only owned execution act, and the act that removes Hermes's
+  host authority). Otherwise never executes commands, never assembles evidence, never
+  types into a shell beyond the single cold-session paste (§4) and the single archive
+  fetch (§8).
+- **Broker (m0broker — the only execution path after cutover):** a dedicated host
+  account that Hermes has no credentials for. Executes only plan-listed commands and
+  pushes capture records to the evidence repo under its own key (§3). This is what
+  moves the evidence boundary out of the executor's hands.
+- **Hermes (interviewer/scribe, NOT a trust root and NOT an executor after cutover):**
+  prepares command blocks, drafts plans + evidence packs, commits manifests and
+  transcript rows. After cutover it holds no host credentials (§3.1) and cannot write
+  the broker's evidence commits (§3.4); its own commits are audited against the
+  broker's record (§3.7).
 - **Council (Grok + ChatGPT, quorum 2/2):** independent review of every wave's evidence
-  at pinned SHAs, 2-of-2, same discipline as rounds 01–06. Council validates EVIDENCE
-  (was the recorded evidence complete and does it show what is claimed); only the owner
-  authorizes.
+  at pinned SHAs, 2-of-2, same discipline as rounds 01–06, fetching the broker's raw
+  record URLs directly (§3.7). Council validates EVIDENCE (was the recorded evidence
+  complete and does it show what is claimed); only the owner authorizes.
 
 ### 1a. Design Review §9 mapping (explicit; per ChatGPT C1/C4)
 
@@ -82,27 +80,82 @@ protocol adopts Grok's stricter reading: protocol ACCEPT alone binds nothing; ev
 wave's answer/evidence pack, including Wave 0's rulings, is itself council-validated
 before it binds.
 
-## 3. Independent, complete evidence capture (ChatGPT C1 + Grok amendment 3)
+## 3. Evidence capture: broker architecture (rev-3; ChatGPT round-2 Q3 at `2951d35`)
 
-Hermes is executor AND scribe, so completeness is never taken on trust:
+Round-2 finding adopted: shell telemetry plus an externally pinned digest makes
+submitted records tamper-evident but does NOT prove complete capture — an executor that
+controls the shell also controls the evidence boundary, and Hermes is both executor and
+scribe. Rev-3 moves execution and capture out of Hermes's control. Grok's round-2
+judgment is preserved as the §3.8 limitation statement: this is omission-proofing
+against the executor, not cryptographic proof of honesty.
 
-1. **Independent append-only capture.** Every interview session runs under shell
-   telemetry that writes each command + arguments, timestamps, exit status, stdout,
-   stderr — directly, including failed attempts — to a capture file Hermes cannot
-   silently rewrite or selectively omit. Before any wave's evidence is committed, the
-   capture log's digests are pinned with an external signed checkpoint (a transparency
-   log such as `cosign attach hashedrekor`, or an equivalent external hash anchor) so
-   omission is detectable after the fact.
-2. **Per-wave manifest.** Each wave commits: the full capture log, the pass AND
-   fail/skip rows, the transcript rows for that wave, and an explicit **"what was not
-   run"** list.
-3. **Delta duty.** Hermes's council prompt must report the capture delta: every
-   destructive or unexpected command observed in the raw capture, including ones that
-   bear on no claimed test. If independent capture or external pinning cannot be
-   established for a wave, the council treats completeness as UNPROVEN and must not
-   infer it from Hermes's summary.
-4. **Council REJECT is mandatory** if any manifest item is missing. Hermes is not a
-   trust root for omission.
+**3.1 — Broker setup (one-time, owner-run).** Before Wave 0 consumes any command whose
+truth depends on capture completeness, the owner installs a dedicated Unix account
+(`m0broker`) on the host by running one committed script — `scripts/m0-broker-setup.sh`
+— with the owner's own hands, after reading it. The script: creates m0broker (no sudo,
+no membership in any privileged group beyond docker); installs the broker runner as a
+systemd unit under that account, which watches a request queue in the evidence repo and
+executes ONLY plan-listed commands (§3.3); enrolls a broker-only GitHub deploy key with
+write access to the evidence repo's broker branch — a key that exists nowhere in the
+Hermes container; and as its final step revokes the Hermes host-SSH key from every host
+account and confirms the docker socket is reachable by m0broker and the owner only. The
+script's terminal output is committed as a Wave-0 evidence row — owner-run acts are
+owner records — and the council verifies the POST-cutover state from the broker side per
+§3.6, not from the script's promises.
+
+**3.2 — No direct execution after cutover.** Every M0 host operation runs only through
+the broker. Hermes holds no host credentials, no docker socket access, and no key to the
+evidence repo's protected branches — so it cannot bypass, disable, or alter broker
+capture. (The container→host SSH channel is the single point of execution authority
+today, which makes §3.1's revocation step the load-bearing one.)
+
+**3.3 — Plan-gated execution.** Each wave carries a plan file — the exact commands with
+full argv — listed in the interview and owner-confirmed in the §6a read-back; the plan's
+digest is recorded in a transcript row the owner signs. The broker executes only
+requests whose command digest appears in the currently open wave's signed plan.
+Everything else is refused, with a refusal record the broker commits to the evidence
+repo itself. A refusal record is a detected bypass attempt — visible to the council,
+never silently dropped.
+
+**3.4 — Capture outside the execution boundary.** The broker pushes the full record of
+every operation — request, exact argv, start/end timestamps, exit code, complete
+stdout/stderr including failures, digests of produced artifacts — directly to the
+evidence repo under its own key, as commits Hermes neither authors nor relays. Hermes
+may cite URLs; it cannot author, edit, or reorder those bytes.
+
+**3.5 — No-unlogged-path rule + per-wave manifest.** Any M0-relevant operation class
+that cannot be routed through or observed by the broker is excluded from the wave and
+recorded in the explicit "what was not run" list, treated as unproven — never silently
+assumed captured. Each wave commits: the broker's full wave record, the pass AND
+fail/skip rows, the wave's transcript rows, and the not-run list. Any planned operation
+missing from the broker record is a delta row with a stated reason (delta duty).
+
+**3.6 — Cutover bypass-detection test (Wave-0 gate; ChatGPT's required test).**
+Immediately after cutover, before any later wave consumes a command whose truth depends
+on capture completeness, all four of the following are executed and committed:
+(a) the Hermes identity attempts host SSH — must be refused, host-side log line
+captured; (b) the Hermes identity probes the docker socket — must be permission-denied;
+(c) an out-of-plan request to the broker — must produce a refusal record; (d) a
+broker-authored evidence commit — the council fetches the evidence repo raw URL and
+verifies the commit author and signature directly. Until all four are verified, capture
+completeness is UNPROVEN and no evidence row binds.
+
+**3.7 — Anchoring + independent reconciliation.** The anchor is the evidence repo's git
+history — signed commits, server-side chronology, append-only enforced by push rights
+(Hermes holds none). When public transparency logging is reachable (Sigstore Rekor), the
+broker additionally publishes a per-wave checkpoint digest there. The council receives
+the broker's complete wave record, fetches it directly from pinned raw URLs — never from
+a Hermes summary — and reconciles it against the manifest, transcript, pass/fail/skip
+rows, and declared operations. Missing records or unexplained gaps ⇒ council REJECT is
+mandatory. Hermes is not a trust root for omission.
+
+**3.8 — Limitation statement (required; do not overclaim).** The broker is a separate
+account, key, and commit identity on the same physical host — not a second machine and
+not a hardware root of trust. A colluding owner can alter the broker; the owner is the
+single point of ultimate authority in this project by design (§9). Rev-3 claims:
+completeness of capture against Hermes as adversarial executor (no host credentials
+post-cutover, plan-gated execution, refusal records, council-fetched evidence). Rev-3
+does not claim: cryptographic proof of honesty against the owner.
 
 ## 4. T0.5 cold-session row (challenge/response; limits stated)
 
@@ -117,8 +170,10 @@ What is true and what is required:
 - The fresh session must then produce a response to a follow-up **challenge** that was
   not contained in the prepared paste, and the owner **attests** that the session was
   newly opened with no carried conversation context.
-- The cold-session exchange log (with the §3 capture telemetry) is committed and
-  pinned, and the **council inspects the resulting exchange at its pinned source**.
+- The cold-session exchange runs as a broker request under the open wave's signed plan,
+  so the exchange log lives in the broker's §3.4 record — the same capture path as every
+  other command. It is committed and pinned, and the council inspects the exchange at
+  its pinned source.
 - Pass/fail comes solely from committed command-output evidence under council review —
   never from the paste, the attestation alone, or Hermes.
 - Limits stated accurately: this makes silent fabrication by Hermes detectable and
@@ -155,7 +210,7 @@ evidence is never collapsed into one end-loaded review (both members, Q4).
 
 | Wave | Hermes executes | Owner says (total sentences) |
 |---|---|---|
-| 0 | (after protocol ACCEPT) C1/C2 host prep; readiness re-check | rulings for execution-blocking open decisions (D-06/07/11/17/18, OQ-9 as needed) — shape (c). Wave-0 pack gets its own council validation (§2a). |
+| 0 | (after protocol ACCEPT) broker setup + §3.6 cutover test (owner runs §3.1 script); C1/C2 host prep via broker; readiness re-check | 1 setup-script run (§3.1) + rulings for execution-blocking open decisions (D-06/07/11/17/18, OQ-9 as needed) — shape (c). Wave-0 pack gets its own council validation (§2a). |
 | 1 | C3/C4/C5 prep: archive + copy + drill (writes only, zero destructive) | 3 approvals (shape a) + 1 risk acceptance (F-1, shape b) + read-back (§6a) |
 | 2 | Build chain: compose up, pin digests, sidecar smoke, archive fetch (§8), **then the cold-session row (§4)** | 1 fetch + 1 paste + 1 challenge answer (§4) + read-back |
 | 3 | Verification chain: T-13, T-16, T-15, T-19, T-05, solve attempt, R-4/R-5/R-7 live walk with T-11 evidence (first live execution closes the three exceptions) | 0 unless a live re-confirm (§5) or an irreversible fork appears; + read-back |
@@ -174,24 +229,27 @@ proves tamper-evidence of committed entries, not speaker identity; the read-back
 are what authenticate the record with the owner.
 
 **Total expected owner labor: ~20 sentences + 1 fetch + 1 paste + 1 challenge answer +
-5 read-back confirmations. No typing of commands, no assembly, no transcription work.**
+1 setup-script run (§3.1) + 5 read-back confirmations. No typing of commands, no
+assembly, no transcription work.**
 
 ## 7. Transcript
 
 `workflows/m0-interview-transcript.md` — one row per question/answer, sha256-chained
 (§6a), owner text verbatim, never edited; corrections appended as new rows, never
 rewritten. Wave-level hashes for the read-back. This file is itself evidence in every
-council pack.
+council pack, reconciled per §3.7 against the broker's record.
 
 ## 8. The human keyboard moments (complete list)
 
-1. Wave 2: fetch the archive once (`curl` the pinned-branch archive to `~/he-build/`
+1. Wave 0: read and run `scripts/m0-broker-setup.sh` once, with own hands (§3.1) —
+   the act that ends Hermes's host execution authority.
+2. Wave 2: fetch the archive once (`curl` the pinned-branch archive to `~/he-build/`
    — no git clone; build box has no repo access) + open the fresh session + paste the
    prepared trigger + answer the follow-up challenge (§4).
-2. Authority sentences + per-wave read-back confirmations (spoken/typed as chat
+3. Authority sentences + per-wave read-back confirmations (spoken/typed as chat
    messages, executed by Hermes as transcript rows).
 
-Everything else — every `make`, every drill, every hash — is Hermes's keyboard.
+Everything else — every `make`, every drill, every hash — runs through the broker (§3).
 
 ## 9. What this protocol does NOT do
 
