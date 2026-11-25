@@ -67,8 +67,8 @@ semantic agreement.
 | M1 | Does every spawn edge (D1/D3/D4) route **only** through the spawn-sidecar's 4 HTTP ops (TD §6.2b), with no engine/sidecar socket mount and no fifth `reap` edge? | 🧑 |
 | M2 | Do D2/D3/D4 name the sidecar as **sole docker.sock holder** *and* carry the root-equivalent-if-compromised label (D-16 ACCEPTED caveat)? | 🧑 |
 | M3 | Does D4 show agent→toolserver over the `he-agent` network with **zero published host ports** (D-15 rev), and MinIO on host loopback only? | 🧑 |
-| M4 | Does D3's network inventory enumerate exactly `he-edge / he-agent / he-internal / /var/run/he-runs` with no legacy alt-architecture subgraph? | 🧑 |
-| M5 | Does D9 match NFR-01 step-for-step (SIGTERM → drain → stop-orchestration → confirm-no-container-created → engine exits → sidecar → class-C core-5 → `down --remove-orphans`, `he-stack=1`)? | 🧑 |
+| M4 | Does D3's network inventory enumerate exactly `he-edge / he-agent / he-internal / /var/run/he-runs` with no legacy alt-architecture subgraph? **[DP-R5-walk erratum 2026-11-24 — operator ruling on walk row M4: `he-edge` and `/var/run/he-runs` are phantom tokens — repo-wide they occur nowhere but this row, introduced with it in `68626eb` (r12); no architecture, ADR, requirement, or QA artifact defines them; the documented run workspace is `heat-data/runs/<id>/work`. Operative predicate now: D3's inventory names the documented deployment-scope network/storage elements it actually depicts — `he-internal` (4-op spawn edge), sole `/var/run/docker.sock` holder, published ports 9000/9001 minio-only behind `127.0.0.1` (toolserver publishes nothing), `heat-data` bind mounts (`runs/<id>/work` included) — while `he-agent` membership is a D1/D4 edge-label + §5.3/§5.4b prose scope item, not a D3 element; the no-legacy-alt-architecture-subgraph leg is retained unchanged. D3 itself was verified conformant — do NOT add `he-edge`/`he-runs` to any diagram.]** | 🧑 |
+| M5 | Does D9 match NFR-01 step-for-step per §6.10 six steps (erratum 2026-11-24: former parenthetical was stale pre-v1.13 text): ① compose stop -t grace → engine stops claiming; ② engine→sidecar SIGTERM, wait ≤ grace, re-issue kill; ③ record interrupted/killed write-ahead BEFORE engine exits; ④ compose down (class C only); ⑤ host-side janitor sweep of he-stack=1 remnants; ⑥ verify zero containers (docker ps -a label filter + compose ps -a; class X excluded)? | 🧑 |
 | M6 | Do D5/D6 ticket-state edges match §8.1/§8.8 claim semantics (flock at execution time; supersede after kernel-released lock)? | 🧑 |
 | M7 | Do D7/D8 match §8 write-order and §6.9 backup procedure (quiesce-and-wait, `$ROOT` OneDrive root, digest verify)? | 🧑 |
 | M8 | Do diagram node names equal §6 component names (no drift in either direction)? | 🧑 |
@@ -171,6 +171,43 @@ conditions: OQ-5 resolved and OQ-1/OQ-4 ruled before M0 build starts; FINDING-04
 accepted as M0 evidence work, not document defects. *(r13 note: OQ-1 RULED CLOSED and
 OQ-5 CLOSED since written; OQ-4 D-06-half remains reviewer-side before M0.)*
 
+### §9 exception annotation — single-human ops-reviewer scheme (2026-11-24)
+
+**Registered structural exception (owner ruling 2026-11-24):** the project has exactly one
+human participant; the §9 engineering-reviewer and ops-reviewer rows cannot be filled by
+independent humans. Under the registered single-human scheme
+(`workflows/adviser-input/round-05/single-human-scheme.md`), these rows are filled by
+**council transcripts** (Grok blind ops-walk + ChatGPT blind falsification/cross-check,
+quorum 2-of-2, verbatim archives under `workflows/adviser-input/round-05/`) plus the
+**owner's interactive walk** (`engineering-walk-transcript.md`, CLOSED 6/6 PASS, re-walks
+MATCH at every pin). This annotation is the disposition of R-02's §9 finding.
+
+**Verdicts as filled under this scheme:** engineering row — owner walk 6/6 PASS +
+ChatGPT blind confirmation (zero surviving counter-examples to the six owner rows).
+Ops row — **approve with exceptions** at final pin (see below); not an independent-human
+approval and never representable as one.
+
+**Ops-row exceptions (carried, not converted to passes):**
+1. Runbook gaps R-4 (no concrete restore procedure), R-5 (wrong/undefined service target —
+   `make up workflow-engine` where the restarted service is `spawn-sidecar`), R-7
+   (archive destination undefined) — found independently by both council reviewers;
+   owner ruling 2026-11-24: accept as recorded exceptions; repair is M0-gated work
+   (HARD STOP §10), not a document fix.
+2. Scenario-supply protocol deviation (self-disclosed by ChatGPT): reviewers authored
+   their own dry-run scenarios; comparison was post-hoc divergent-set analysis, not
+   literal cross-supplied re-runs. Owner ruling: accepted exception; coverage is
+   documented as divergent (3 shared stalls R-4/5/7 + 3 divergent R-2/6/9).
+3. Council validity limit (restated verbatim from ChatGPT Q3): a council reviewer is
+   independent of artifact authorship, not an independent human or an authority to accept
+   operational risk; the owner alone retains residual-risk acceptance.
+
+**Not closable by any review (unchanged human/M0 gates):** T-01…T-24 execution (runtime
+evidence), §2b + QA §5 sign-offs as *human* acts, OQ-9 off-host L4/L5 durability (manual
+web read-back is the only evidence), F-1 authN/Z beyond network membership (compromised-
+sidecar root-equivalence stands). Nothing in this annotation or the council record
+constitutes deployment approval.
+
+
 ## 10. Independent review record (rounds 12–13, r13)
 
 A **read-only delegated independent reviewer** (not the authoring agent) audited the r12
@@ -182,7 +219,7 @@ issue reconciliation, diff scope). Verdict: **APPROVE WITH EXCEPTIONS**.
   "18 records" → 17 with numbering note; TD §18 filing-time self-assessment reframed as
   v1.2 snapshot (FINDING-08 recurrence); TD §8.2 stale "A1 pending" → ACCEPTED/CLOSED;
   RR status banner + T-01…23 inline note; QA v2.3 sync. Re-gated **27/27 PASS**.
-- **Open exceptions (not doc-fixable — carried into M0):** M1–M10 diagram↔prose checklist
+- **Open exceptions (not doc-fixable — carried into M0):** M1–M10 diagram↔prose checklist [DP-R4 erratum 2026-11-24: checklist is M1–M9 — M10 never existed; register R-02 corrected same date; original preserved]
   (§2b) and QA §5 diagram sign-offs unclaimed (human-only); T-01…T-24 specified-only,
   zero executed (design freeze gated on M0 evidence); OneDrive off-host durability has no
   L4/L5 proof (OQ-9 contingent); no authN/Z beyond `he-agent` group membership (F-1

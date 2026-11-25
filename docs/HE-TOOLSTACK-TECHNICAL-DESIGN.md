@@ -279,6 +279,9 @@ graph LR
         I6[property-pipeline]
         PG[gate scripts<br/>inside images]
     end
+    subgraph Spawn["Spawn path (D-16, §6.2b)"]
+        SC[spawn-sidecar<br/>sole docker.sock holder<br/>root-equivalent if compromised]
+    end
     subgraph Data["Data plane"]
         HD[(heat-data<br/>authoritative)]
         MI[(minio<br/>promoted immutable)]
@@ -286,13 +289,17 @@ graph LR
     end
     TS -->|INSERT submissions only| Q; TS --> R
     Q --> ADM; Q --> RU
-    RU --> I1 & I2 & I3 & I4 & I5 & I6
+    RU -->|"spawn/kill: 4-op HTTP (§6.2b)"| SC
+    SC -->|"Docker API via sole socket"| Exec
+    RU -->|"step spec / artifacts (data-flow only)"| I1 & I2 & I3 & I4 & I5 & I6
     I1 & I2 --> PG
     RU --> HD; PG --> HD; TS --> HD
     HD --> MI; HD --> GI
 ```
 *Diagram 2 — logical components. Every box names real or [P]-proposed code; no broker box
-exists because D-03 deleted the responsibility into ADM.*
+exists because D-03 deleted the responsibility into ADM. Sole Docker control path is
+runner → spawn-sidecar → host engine (§6.2b, D-16); runner→image edges are data-flow only
+(step specs, artifacts), never container-control.*
 
 ### 5.3 Physical / deployment architecture
 Single host; single compose project; toolserver published **NOTHING** — reachable from the
@@ -316,13 +323,13 @@ graph TB
             subgraph CP["compose project: he-toolstack"]
                 TSc["toolserver container<br/>user: non-root uid 1000"]
                 WEc["workflow-engine container<br/>mounts heat-data rw<br/>NO Docker socket — D-16, FINDING-03"]
-                SCc["spawn-sidecar container<br/>sole /var/run/docker.sock holder<br/>D-16 ACCEPTED 2026-11-16"]
+                SCc["spawn-sidecar container<br/>sole /var/run/docker.sock holder<br/>D-16 ACCEPTED 2026-11-16<br/>root-equivalent if compromised"]
                 MOc["minio container<br/>volume heat-data/minio"]
             end
             J1[job container<br/>one-shot, network_mode none,<br/>bind: heat-data/runs/&lt;id&gt;/work]
         end
         HDD[("/dev/sdf ext4<br/>/home/steven/HE-toolstack/heat-data")]
-        LB["host published ports: 9000/9001 minio only (operator,<br/>127.0.0.1 prefix; toolserver publishes NOTHING —<br/>reached via he-agent net, zero host listener [V D-15])"]
+        LB["host published ports: 9000/9001 minio only (operator,<br/>127.0.0.1 prefix [proposal], §11.6; toolserver publishes NOTHING —<br/>reached via he-agent net, zero host listener [V D-15])"]
     end
     TSc --- LB; WEc -- bind mount rw --> HDD
     J1 -- bind mount rw --> HDD; MOc -- bind mount rw --> HDD
@@ -339,7 +346,7 @@ engine as "ALTERNATIVE") is removed: the engine never sees a socket under any op
 ```mermaid
 graph LR
     AGENT[agent container<br/>default bridge +<br/>connected to he-agent net] -- "HTTP http://toolserver:8100<br/>(he-agent net member only; zero publish [V])" --> TS[toolserver]
-    OPS[operator ssh :2222] -- "compose/CLI + :9001 console" --> STACK[compose project]
+    OPS[operator ssh :2222] -- "compose/CLI + :9001 console<br/>(loopback bind 127.0.0.1 [proposal], §11.6)" --> STACK[compose project]
     TS -- "HTTP in-project :8200 (bridge he-net)" --> WE[workflow-engine]
     WE -- "spawn: 4-op HTTP<br/>(D-16 ACCEPTED 2026-11-16)" --> SC[spawn-sidecar<br/>he-internal only;<br/>sole docker.sock holder;<br/>root-equivalent if compromised] -- "Docker API (socket)" --> DE[host engine]
     WE -- "S3 API :9000 in-net" --> MO[minio]
@@ -901,13 +908,13 @@ sequenceDiagram
     participant CP as compose (class C)
     MD->>WE: step 1 compose stop -t grace<br/>SIGTERM: stop claiming
     WE->>SC: step 2 POST /v1/runs/id kill<br/>(engine has NO socket, D-16)
-    SC->>JB: SIGTERM running jobs
+    SC->>JB: SIGTERM running jobs → wait ≤<br/>TS_SHUTDOWN_GRACE_SECONDS=60 [P]<br/>→ re-issue kill (§6.10 step 2)
     JB-->>WE: exit codes via status/logs API
     WE->>WE: step 3 record interrupted/killed<br/>write-ahead BEFORE exit
     WE->>WE: engine exits (drained)
     MD->>CP: step 4 docker compose down<br/>(removes class C only)
     MD->>MD: step 5 host-side janitor sweep<br/>rm label he-stack=1 remnants<br/>(works with engine AND sidecar dead)
-    Note over MD: step 6 assert: docker ps -a filtered by label he-stack=1 returns zero<br/>covers class C and J — class X host backup timer is not a container
+    Note over MD: step 6 assert: docker ps -a filtered by label he-stack=1 returns zero<br/>AND docker compose ps -a is empty (§6.10 two-part check)<br/>covers class C and J — class X host backup timer is not a container
 ```
 *Diagram 9 — shutdown with running jobs (r9). Choreography is the host `make down` recipe;
 no step depends on an already-stopped engine, and jobs are killed through the sidecar
@@ -1459,16 +1466,68 @@ prohibition: no step a fresh session can't run blind)
 - **R-3 GPU class won't admit:** check `GPU_CLASS_ENABLED` + C6 ticket state + probe file
   (profile `gpu`); expected *normal* state until C6 — do not "fix" by toggling flag (FR-18
   ruling).
-- **R-4 restore:** fresh host dirs from nightly backup at the canonical backup root (§6.9, via WSL) → `make up` → T-11 drill: pull one
-  promoted object by versionId, digest-compare → run M0 slice (§11.5 deploy smoke).
-- **R-5 spawn channel broken (OQ-5 dependent):** sidecar restart (`make up workflow-engine`
-  scoped) → verify via `make test-smoke` → if docker.sock class issue: host docker service
-  check (host action — documented as out-of-stack).
+- **R-4 restore (FM-3/FM-13 disk-loss class; concrete procedure — R-05/round-05 gap fix):**
+  (1) **Select source:** newest dated dir under `$ROOT/heat-data/` — the published-backup tier
+  only (§6.9.2 step 7; never `repo/` or `drills/`) — with a schema-valid
+  `DONE.json`; dir without valid DONE.json = incomplete tree → excluded, never a restore
+  source (§6.9.2 step 8, §9.6 step 1). (2) **Re-hash before touching live paths:** every file
+  vs its manifest (`manifest.src`) at drill/restore time. (3) **DB check in scratch first:**
+  restore snapshots to scratch dir → `PRAGMA integrity_check` + `quick_check` clean (§9.6
+  step 2). (4) **Restore:** host steps first [P, host recipe]: provision + mount the replacement ext4
+  volume at the heat-data mount point (§2.6 host prerequisite — a host action, not a compose
+  op), copy the selected backup's `heat-data/` tree into the §9.2 layout (drill mode:
+  disposable isolation dir, never the authoritative path — §9.6), then the host **seed
+  script** (pre-baked image tars, §11.5/§12.2) so `make up` can start without a registry;
+  `workflows/` ledger tier comes from the GitHub remote (or the backup's git bundle §9.6
+  step 6), not from the file tree. (5) `make up` → §8.6 boot reconcile converges every run to
+  terminal-or-queued, healthz trio green (§7.2). (6) **Versioned-tier proof:** per §6.9.3 export semantics (**no `?versionId=`
+  read-back exists**) — select the version in the version manifest, re-upload its exported
+  payload as a new object, digest-compare vs ledger.
+  (7) `make test-smoke` (M0 slice, §11.5) → ledger note. **Cold-session rule (T0.5):** this
+  runbook must be executable from the paper alone with zero conversation context.
+- **R-5 spawn channel broken (sidecar is the broken service — round-05 gap fix: former text
+  named `make up workflow-engine`, which is the WRONG target):** symptom = every
+  `create_run` returns `500`/`spawn_timeout` in engine logs while `status` calls fail **pre-restart** (the step-(3) probe below is a post-restart liveness check, not a replay of this symptom).
+  (1) `make ps` → identify which of engine vs sidecar is unhealthy. (2) Restart the **sidecar
+  only**: `docker compose up -d spawn-sidecar` (scoped; class-C service, §6.10) — the engine
+  keeps serving queue while the sidecar returns; restart the engine separately only if IT is
+  the unhealthy one. (3) Verify the sidecar leg: a `GET /v1/runs/{id}/status` (§6.2b) answering proves
+  API liveness **only** — it can 404 while `create_run` still times out. The failing
+  operation must be exercised: one controlled `POST /v1/create_run` with an allowed digest
+  under normal sidecar restrictions (§6.2b), confirm the container spawns, then
+  `POST /v1/runs/{id}/kill` (the §6.2b kill op — there is no `/v1/cancel`) or let it finish, then follow with a status check + confirm state cleanup. `make test-smoke` is the
+  backstop, not this runbook's proof (it is T-01 echo + healthz + down/up, §11.5 — it never
+  exercises create_run). (4) If the
+  sidecar itself cannot reach `/var/run/docker.sock`: host docker **dependency** check (host action,
+  out-of-stack; docker engine is a §2.6 host prerequisite — NOT the §11.9 class-X unit,
+  which is the backup timer) → `sudo systemctl status docker`. Do not grant the
+  engine a socket (D-16 invariant — a "fix" that exposes the socket to the engine is a
+  violation, not a repair).
 - **R-6 evidence degraded (`degraded-evidence` state):** minio healthz → creds env present →
   promote retries auto; if bucket-missing: recreate bucket (idempotent) — runs already
   succeeded stand (design §6.5).
-- **R-7 disk full:** engine refuses at hard watermark (FM-6); operator archives cold runs to
-  archive disk (promotion copies exist in MinIO) — decision support: `du` report command.
+- **R-7 disk full (archive destination + procedure made concrete — round-05 gap fix;
+  round-06 council corrections applied):** engine is specified to refuse new at the 95 %
+  hard watermark (FM-6; §9.4 — thresholds are §11.6 [proposal] until M0 builds them).
+  Procedure: (1) **report:** `du -sh heat-data/runs/* | sort -rh | head -20` (Makefile
+  target `make disk-report` = exactly this + df of the owner disk [proposal, M0 build]).
+  (2) **Eligibility:** a run is archivable only when terminal (state.json terminal +
+  gate_report present + ledger line appended + every promoted object for the run verified
+  **readable from the live MinIO service** — head/get by key + digest-compare vs ledger;
+  distinct from the §6.9.3 backup export, which is [proposal]/T-22 and not a liveness
+  check). (3) **Archive:** move the run's `work/` + heavy `artifacts/` to
+  `/home/steven/backups/archive/` [P] (new child dir under the §9.4 legacy second-disk
+  root [E] — does not yet exist; created as part of the first archive run), layout
+  `…/archive/<yyyymmdd>.<run_id>/` mirroring the run dir, `.N` suffix on name collision;
+  after each move, digest-compare moved files vs pre-move digests **before** removing the
+  source. **Data-loss rule: if the archive destination is unavailable, local deletion is
+  limited to the promoted tier covered by step-2 verification — `work/` has no verified
+  copy elsewhere (promotion is not a copy of the working dir, §9.2) and may not be deleted
+  without first being archived with its own post-move verification.** Never archive to
+  `$ROOT` (backup root is not an archive). (4) Keep per run: `state.json`, `journal/`,
+  `gate_report.json`, `manifest.json` (≤ few MB — crash forensics + digest chain stay).
+  (5) Re-verify: `df` headroom + a new job admitted. Deletion of ledger/evidence rows stays
+  human-only (§9.4 — never automatic).
 - **R-8 backup health / stale backup (two-part, §6.9.4):** **(i) L2/local** — timer missed, `BACKUP_ROOT` unreachable (C: `/mnt/c` unmounted, OneDrive paused), or **no fresh valid `DONE.json`** under the canonical root within cadence + grace: nightly job writes a ledger line + sentinel `heat-data/backup.status.json` (`{ts, runid, dest, done_verified}`); `make doctor` fails if sentinel age > 36 h [P]. Fix path: re-mount/enable → run `make backup` → confirm DONE appears. **(ii) L5/remote** — `drills/onedrive-readback.log` mtime older than 7 d [P] → operator reminder: manual web read-back due (M0 default) or Graph automation once **OQ-9** decides. `attrib` placeholder inspection is **negative-only** diagnosis (attribute set ⇒ provably not uploaded yet; cleared ⇒ still unproven), never a completion check. Promotions continue during staleness (git + MinIO tiers unaffected) but `backup_stale` surfaces in healthz (NFR-22 guard).
 - **R-9 Docker-daemon restart drill (RC-3):** `sudo systemctl restart docker` (host)
   with one synthetic job running ⇒ all containers return ⇒ reconcile log shows re-adopt or
@@ -1509,7 +1568,7 @@ with the table by gate Q16).
 
 | FM-11 | **Daemon restart wedges orphaned `running` rows** (WSL2 class RC-3) | real class [V C6 volatility] | jobs stuck-looking; queue stalls | boot+tick reconcile (§6.2 long-running bullet) | re-adopt or re-queue per §8.6 matrix | ≤ lease window | **R-9 drill** (new) |
 | FM-12 | **OneDrive backup target offline/paused at job time** (Windows-side sync daemon) | med [V: user runs OneDrive] | backup write fails silently | §6.9: write-only-when-reachable check + last-success stamp + ALERTS line | next nightly retried; staleness escalates at 72 h | T-18 (new) |
-| FM-13 | **D-05 disk loss** (`/dev/sdf` ext4 volume dies) | low-med (1 TB shared mech disk [V]) | **only unrecoverable class** | RPO ≤24 h backup (§6.9) | RC-5 restore drill evidence | R-5 |
+| FM-13 | **D-05 disk loss** (`/dev/sdf` ext4 volume dies) | low-med (1 TB shared mech disk [V]) | **only unrecoverable class** | RPO ≤24 h backup (§6.9) | RC-5 restore drill evidence | R-4 restore procedure (was mis-pointed to R-5; corrected round-06 — R-5 is the spawn-channel runbook) |
 
 ### 12.2 Backups & restore
 Backup = host-dir mirror (nightly) to the canonical backup root
@@ -1540,8 +1599,8 @@ affected state → required action → proven-by**:
 | RC-1 **Process restart** (compose-managed service) | uvicorn/engine process inside a live container | `restart: unless-stopped` + healthcheck gap | none (WAL survives; leases held ≤60 s) | automatic; engine boot reconcile pass (§8.6) | T-07 kill matrix |
 | RC-2 **Container restart** | container (OOM, `docker restart`, image change) | compose restart counter; boot banner digest | same as RC-1; scratch `jobs/<id>/` survives (heat-data) | automatic + boot reconcile | T-07 variant |
 | RC-3 **Docker daemon restart** | dockerd (host-side; **real event class on WSL2**, C6 precedent [V]) | every container restarts together; engine boot sees **all** jobs as `running` with no live container | jobs re-adopted **only if** their container is back within lease window, else re-queued (idempotent exec absorbs) | automatic; R-1 check "docker state vs queue state" | T-07 + **R-9 (daemon restart drill)** |
-| RC-4 **Host reboot** | whole box (WSL shutdown, Windows update — routine here [V]) | fresh boot: nothing runs until operator (or WSL session) brings the stack up | heat-data intact (ext4 on `/dev/sdf`); queue resumable; **no auto-start claim** — stack starts when the WSL session exists | `make up` (runbook R-1) + boot reconcile; verify backup freshness | R-1 + R-5 drill |
-| RC-5 **Host disk failure** (`/dev/sdf`) | authoritative state volume | data unreadable/missing | **total state loss** — the only unrecoverable-without-backup class (D-05 single point, stated) | restore §6.9 procedure to fresh WSL + seed script; RPO ≤24 h hot tier | **R-5 full restore drill (the only credible evidence)** |
+| RC-4 **Host reboot** | whole box (WSL shutdown, Windows update — routine here [V]) | fresh boot: nothing runs until operator (or WSL session) brings the stack up | heat-data intact (ext4 on `/dev/sdf`); queue resumable; **no auto-start claim** — stack starts when the WSL session exists | `make up` (runbook R-1) + boot reconcile; verify backup freshness | R-1 + R-9 drill (round-06 erratum: row said "R-5 drill" since v1.2 — R-5 is the spawn-channel runbook, never a drill; a reboot tears the daemon down too, so R-9 is the matching drill class — scope note: R-9 exercises daemon restart, NOT a Windows/WSL host-reboot drill; the full RC-4 reboot scenario still earns its own evidence at M0) |
+| RC-5 **Host disk failure** (`/dev/sdf`) | authoritative state volume | data unreadable/missing | **total state loss** — the only unrecoverable-without-backup class (D-05 single point, stated) | restore §6.9 procedure to fresh WSL + seed script; RPO ≤24 h hot tier | **R-4 full restore drill + T-11 (the only credible evidence)** (round-06 erratum: pointed at R-5 since the row's v1.2 introduction — R-5 has always been the spawn-channel runbook, §11.8) |
 | RC-6 **Network outage** (GitHub remote / LAN) | connectivity, not data | push-retry counter (FM-9); `git push` fails | ledger+state local and consistent; no job impact (loopback) | continues locally; drains on restore | T-09 (mock remote) |
 | RC-7 **Agent context loss** (session ends/crashes) | the *agent*, not the stack | new session starts with empty memory | **zero** stack consequence — state law (D-02): `workflows/` + `state.json` + ledger are the memory | new session reads the ledger + `workflows/` (resumption law, §2.1 goal 2 / §8.8), resumes from open ticket files | **T-02 doubles as this proof (a fresh session is the operator)** |
 Key claims that survive: RC-1..RC-4 need no operator and no restore; RC-5 is the only
@@ -1787,13 +1846,15 @@ sequenceDiagram
 sequenceDiagram
     participant H as host ops timer robocopy driver
     participant HD as heat-data ext4 authoritative
-    participant C as OneDrive root candidate then dated dir on NTFS
+    participant C as OneDrive root $ROOT (§6.9)<br/>candidate then dated dir on NTFS
     participant M as minio versioned bucket
     participant N as fresh or rebuilt env
     H->>HD: quiesce pause file then wait active jobs to zero else abort
     H->>HD: sqlite online backup plus cp -a plus manifest into ext4 snapshot
+    H->>HD: validate source snapshot §6.9.2 step 3<br/>PRAGMA integrity_check + quick_check<br/>ledger parse + sha256 set → manifest.src
     H->>C: robocopy snapshot into candidate dir L2 local copy
     H->>C: verify every destination digest then write DONE.json
+    H->>C: interrupted transfer without valid DONE.json<br/>is not a backup → resume per .copied markers<br/>or quarantine 14 d (§6.9.2 step 8)
     H->>C: publish rename within NTFS volume into dated runid dir
     Note over C: OneDrive upload completion NOT provable locally L4 L5 gap OQ-9 manual web read-back is the L5 evidence
     H->>M: version export rclone s3-versions payloads plus mc ls versions manifest mc mirror withdrawn

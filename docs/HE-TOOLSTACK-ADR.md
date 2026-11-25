@@ -344,7 +344,9 @@ Decision provenance classes, stated up front because reviewers must be able to a
   written last; (6) **OneDrive read-back verification** (enum + digest of at least one marker +
   one sample object; `sync_status` recorded) + 7-day retention pruning. Interrupted backups
   self-heal (rsync resumable; incomplete = no marker = never a restore source). Restore sequence
-  R-4/R-8 is fixed: **quiesce stack → restore registry + DB (integrity_check) → start services →
+  R-4/R-8 is fixed **[round-06 erratum — superseded text; do not copy forward: the
+  restore runbook is R-4 only; R-8 is the backup-health/staleness runbook — this A1
+  mechanics text was superseded by A2, TD §11.8 is normative]**: **quiesce stack → restore registry + DB (integrity_check) → start services →
   verify manifests → resume** — no split-brain reads of a half-restored tree. New RPO 24 h /
   RTO ≤ 2 h + drill. A successful rsync command is explicitly **not** treated as proof of an
   application-consistent backup.
