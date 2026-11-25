@@ -7,7 +7,7 @@ re-gate — 8 targeted corrections; +Q18…Q22) · r3 2026-11-16: +Q23 claim/own
 **Method:** machine-checked where possible (scripts re-run against the repo at HEAD, not
 memory); manual where a human judgment is unavoidable (then stated as such). Baseline:
 commit `b520931` (main); **r12 re-gate baseline = branch `review/architecture-revisions` @ HEAD
-(REQ v1.10 / TD v1.13 / ADR v1.11 / QA v2.3), harness `.hermes-tmp/gates_v13.py` (27 gates Q1–Q2,
+(REQ v1.10 / TD v1.13 / ADR v1.11 / QA v2.3), harness `.hermes-tmp/gates_v13.py` **[DP-R4 note: path at writing time; now `scripts/qa/gates_v13.py` since DP-R3c @ 79beb57]** (27 gates Q1–Q2,
 Q4–Q28; Q3 = external mermaid 12.3.0 parse, run separately, 9/9 blocks OK).**
 
 ## 1. Automated gate results (all re-run this pass)
@@ -94,13 +94,13 @@ Every PASS in this report belongs to exactly one class:
 
 | Class | What it proves | Where the tooling lives | Independently reproducible by a reviewer today? |
 |-------|----------------|-------------------------|--------------------------------------------------|
-| **Static automated gates (Q1–Q28)** | Text/table coherence of the docs in the PR branch — counts, refs, tokens, contract strings | `.hermes-tmp/gates_v13.py` — **scratch dir, NOT committed** | ❌ **No.** The harness is deliberately not promoted into the repo (D-05: docs repo holds design, not tooling; promotion deferred to M0 per this report's own follow-up table). A reviewer cannot rerun these checks without the harness. **We do not claim independent reproducibility for this class.** Limitation stated plainly, not papered over. |
+| **Static automated gates (Q1–Q28)** | Text/table coherence of the docs in the PR branch — counts, refs, tokens, contract strings | `scripts/qa/gates_v13.py` **[DP-R3c/@ 79beb57: PROMOTED — the row below was accurate at QA v2.0 writing time (harness in `.hermes-tmp/`, not committed); [DP-R4 erratum 2026-11-24] this line was stale until this pass.** ✅ **Yes** — a reviewer at any post-79beb57 checkout runs `python3 scripts/qa/gates_v13.py` for 27 PASS (Q3 = external mermaid parse, separate). Original limitation text preserved for history: the harness was deliberately not promoted into the repo (D-05: docs repo holds design, not tooling; promotion deferred to M0 — deferred no longer). |
 | **Mermaid syntax parse** | The 9 diagram sources parse under mermaid 12.3.0 (jsdom headless) | external scratch harness | ❌ No (same reason). Proves syntax ONLY — semantic diagram↔prose agreement is a human checklist: DESIGN-REVIEW §2b. |
 | **Manual author review** | Author read every statement changed and re-derived it from content, not counters | prose itself | Partially — a reviewer can redo the reading; our conclusions are not machine-checkable. |
 | **Independent reviewer action** | DesignStandards §8-D sign-offs (×3) | not started | — (outstanding; this is a freeze gate, not a QA claim) |
 | **Runtime tests T-01…T-24** | Would prove behavior | **specified only; NONE executed** — no code, no deployment exists | ❌ Nothing to run. Every mention of a T-id in this branch denotes a specification, never a result. |
 
-**Command (author-side, for the record):** `python3 .hermes-tmp/gates_v13.py` from the repo
+**Command:** `python3 scripts/qa/gates_v13.py` from the repo root (any checkout ≥ 79beb57) → 27 PASS / 0 FAIL. **[DP-R4 erratum 2026-11-24: pre-R3c this read `python3 .hermes-tmp/gates_v13.py`; stale pointer per register R-09 — fixed.]**
 root prints one line per gate + `TOTAL/FAILS`; exit-agnostic by design. Re-run points at the
 current HEAD at each round; results above are the r12/r13 tree (`T-24` present, REQ v1.10,
 TD v1.13, QA v2.3). **[DP-R2a 2026-11-23: suite re-run against main @ `4b0838c` — 27 PASS /

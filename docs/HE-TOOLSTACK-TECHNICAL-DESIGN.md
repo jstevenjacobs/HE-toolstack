@@ -1642,7 +1642,7 @@ ta-solver-runtime + property-pipeline job types, gate path, ledger+promote, `he`
 minimal. *Acceptance:* **T-01** (echo round-trip) + **T-04** (D2-config reproduced, gate
 pass, digests match E-ledger values [E]) + **T-07** crash-matrix pass (required M0
 artifact, D-02 honesty condition) + **T-13** zero-orphan + **OR-01 timing recorded** (<10 min
-target — measured, reported, not claimed). *Cleanup:* scratch dirs pruned, no stray
+target — measured, reported, not claimed). *Acceptance addendum [DP-R4, ACCEPTED by operator 2026-11-24 per R-04a final recommendation]:* **+ T-11 and T-18 execution + NFR-22 real-copy read-back — pulled forward from M2** (P0 NFR-22 vs M2 placement conflict resolved conservatively; T-11 must precede any C3 MinIO-volume removal; read-back of the actual `pd-minio-orphan/` copy logged before purge, or exception-logged purge approval — original text above preserved). *Cleanup:* scratch dirs pruned, no stray
 containers/images post-suite, `make down` clean. *Exit gate:* all above green + fresh-session
 resume smoke (mini-T-02). [no date claim — sequencing: after OQ-4 sign-off (OQ-1 closed 2026-11-17, OQ-5 resolved 2026-11-16)].
 
@@ -1657,7 +1657,7 @@ diff shows core untouched; ledger documents each image's digest provenance.
 lease/recovery tuning from real runs, backup drill wired to schedule, runbooks R-1…R-7
 proven by table-top exercise (fresh session runs each blind). *Acceptance:* **T-05** (reboot
 durability) + **T-06** (admission math incl. simulated nvidia-smi matrices; + live variant
-iff C6 has passed) + **T-11** (MinIO version restore drill) + **T-15** (negative-network
+iff C6 has passed) + **T-11** (MinIO version restore drill — **initial drill execution moved to M0 acceptance 2026-11-24 per R-04a; M2 retains scheduled recurring drills** [DP-R4]) + **T-15** (negative-network
 probe) + **NFR-18/T-02** cold-session resume ≤10 min measured + tripwire review §8.7 +
 degradation drills (FM-7, FM-6 injected). *Exit gate:* crash-matrix re-run green on the
 *grown* codebase (runner LOC still ≤500 or tripwire fired & decided).
