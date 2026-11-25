@@ -291,13 +291,15 @@ graph LR
     Q --> ADM; Q --> RU
     RU -->|"spawn/kill: 4-op HTTP (§6.2b)"| SC
     SC -->|"Docker API via sole socket"| Exec
-    RU --> I1 & I2 & I3 & I4 & I5 & I6
+    RU -->|"step spec / artifacts (data-flow only)"| I1 & I2 & I3 & I4 & I5 & I6
     I1 & I2 --> PG
     RU --> HD; PG --> HD; TS --> HD
     HD --> MI; HD --> GI
 ```
 *Diagram 2 — logical components. Every box names real or [P]-proposed code; no broker box
-exists because D-03 deleted the responsibility into ADM.*
+exists because D-03 deleted the responsibility into ADM. Sole Docker control path is
+runner → spawn-sidecar → host engine (§6.2b, D-16); runner→image edges are data-flow only
+(step specs, artifacts), never container-control.*
 
 ### 5.3 Physical / deployment architecture
 Single host; single compose project; toolserver published **NOTHING** — reachable from the

@@ -84,3 +84,21 @@ edges `runner ->(spawn/kill: 4-op HTTP (§6.2b)) sidecar` and
 labels + edges only, exactly the two logged defects. Gates 27/0 after fix; 9 Mermaid
 blocks intact. **M2 re-walk owed** against the new commit (label-level judgment: does
 each fix carry the required claim — sole-holder + root-equiv in both diagrams).
+
+## M2 re-walk — **PASS (defect closed)**
+Operator re-walk at fix commit `4759e28`: "D2 and D3 both correctly carry the required
+security claims: sole Docker socket holder and root-equivalent if compromised. MATCH."
+Operator noted the fixes are diagram-level clarification rather than strictly label-only,
+and raised one residual: D2's runner→execution-plane edges alongside the new
+sidecar→execution edge could read as a sidecar bypass. Disposition was CONDITIONAL PASS.
+Resolution per operator ruling (option 'apply relabel + caption addendum'): runner→image
+edge relabeled `step spec / artifacts (data-flow only)`; D2 caption addendum states the
+sole Docker control path is runner → spawn-sidecar → host engine (§6.2b, D-16) and that
+runner→image edges are never container-control. Operator selection declared **M2
+unconditional PASS**. Gates 27/0 after the edit. **M2 = PASS; defect closed.**
+
+## FINAL WALK RESULT (owner rows)
+M1 PASS · M2 PASS (after defect → fix → re-walk → ambiguity resolution) · M4 PASS
+(corrected predicate, §2b row erratum) · M6 PASS (downgrade) · M8 PASS · M9 PASS.
+Approval scope per operator: recorded judgments only — NOT deployment readiness (§9
+sign-off still gated by M3/M5/M7 council walk + remaining §9/§2b items).
