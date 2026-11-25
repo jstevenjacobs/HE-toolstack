@@ -66,3 +66,21 @@ Row PASS = operator YES to a shown pair (prose quote + diagram label) with count
 report clean; missing evidence = DEFECT default (operator may downgrade, one-line reason);
 operator may request "show more" freely. Spot-check phase: operator picks 2 of 6 rows,
 verifies quoted text in pinned tree themselves; mismatch reopens that row.
+
+---
+
+## Addendum 2026-11-24 (mid-walk, operator ruling — recorded after answers, as protocol requires)
+
+**M2: operator answered NO — DEFECT stands** (no downgrade): (a) D2 has no sidecar node;
+(b) D3 sidecar node lacks the root-equivalent-if-compromised caveat D1/D4 carry. Fixes =
+diagram/prose work, post-transcript, new round-branch commit; pinned tree 5a24b0c kept
+walkable.
+
+**M4: operator answered NO — defect ruled to be in the §2b row itself (phantom inventory),
+not in D3.** Ruling verbatim ground: "he-edge / /var/run/he-runs" introduced by the row in
+68626eb, grounded in nothing; D3 verified conformant; D3 must NOT be modified to satisfy
+the erroneous predicate. Erratum applied to §2b row M4 per D-08 annotation pattern; the
+no-legacy-alt-architecture-subgraph leg retained. Under the corrected predicate M4 = PASS
+(D3 names he-internal, sole socket holder, 9000/9001 loopback-published minio, heat-data
+binds incl. runs/<id>/work; no alt-arch subgraph; no stray he-* tokens). Original predicate
+text above preserved unmodified as evidence of what was asked and what was found.
