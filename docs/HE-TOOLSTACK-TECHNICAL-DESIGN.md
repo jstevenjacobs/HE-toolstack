@@ -329,7 +329,7 @@ graph TB
             J1[job container<br/>one-shot, network_mode none,<br/>bind: heat-data/runs/&lt;id&gt;/work]
         end
         HDD[("/dev/sdf ext4<br/>/home/steven/HE-toolstack/heat-data")]
-        LB["host published ports: 9000/9001 minio only (operator,<br/>127.0.0.1 prefix; toolserver publishes NOTHING —<br/>reached via he-agent net, zero host listener [V D-15])"]
+        LB["host published ports: 9000/9001 minio only (operator,<br/>127.0.0.1 prefix [proposal], §11.6; toolserver publishes NOTHING —<br/>reached via he-agent net, zero host listener [V D-15])"]
     end
     TSc --- LB; WEc -- bind mount rw --> HDD
     J1 -- bind mount rw --> HDD; MOc -- bind mount rw --> HDD
@@ -914,7 +914,7 @@ sequenceDiagram
     WE->>WE: engine exits (drained)
     MD->>CP: step 4 docker compose down<br/>(removes class C only)
     MD->>MD: step 5 host-side janitor sweep<br/>rm label he-stack=1 remnants<br/>(works with engine AND sidecar dead)
-    Note over MD: step 6 assert: docker ps -a filtered by label he-stack=1 returns zero<br/>covers class C and J — class X host backup timer is not a container
+    Note over MD: step 6 assert: docker ps -a filtered by label he-stack=1 returns zero<br/>AND docker compose ps -a is empty (§6.10 two-part check)<br/>covers class C and J — class X host backup timer is not a container
 ```
 *Diagram 9 — shutdown with running jobs (r9). Choreography is the host `make down` recipe;
 no step depends on an already-stopped engine, and jobs are killed through the sidecar
