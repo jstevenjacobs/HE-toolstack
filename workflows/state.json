@@ -1,7 +1,7 @@
 {
   "project": "HE-toolstack Phase 2 - Documentation production",
   "phase": 2,
-  "cursor": "DP-R5-walk3 owner walk closed 6/6 PASS; council walk (M3/M5/M7) pending dispatch",
+  "cursor": "DP-R5-opswalk owner re-walk MATCH at e7f261b; council follow-up (ChatGPT Q1/Q2/Q3) pending dispatch",
   "completed": [
     "P2.0",
     "P2.1",

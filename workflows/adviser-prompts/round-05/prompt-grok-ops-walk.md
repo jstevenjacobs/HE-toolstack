@@ -5,20 +5,20 @@ You are serving as **ops reviewer** for HE-toolstack under the single-human sign
 row). Your transcript, archived verbatim, becomes the ops evidence — grade yourself
 accordingly: a walk that recites the docs' own claims back is INVALID by the protocol.
 
-Read first (pinned full SHA `bc73dfce1b714a333ce4e53d4226f6dcf7c9741e`, branch dp/round-05-signoff-scheme):
+Read first (pinned full SHA `e7f261bad8f184a9e43cc965603d0b480a4317ca`, branch dp/round-05-signoff-scheme):
 
 **Status update (re-pinned 2026-11-24):** this walk was re-pinned from `9c578be` to
-`bc73dfc` after the owner's interactive engineering walk closed 6/6 PASS on the owner
+`e7f261b` after the owner's interactive engineering walk closed 6/6 PASS on the owner
 rows (M1/M2/M4/M6/M8/M9). Changes since the old pin: §2b M4 row erratum (phantom
 inventory struck, D-08 pattern), D2 gained a spawn-path subgraph + data-flow relabel +
 caption addendum, D3 sidecar label gained the root-equivalent caveat. Read
 `workflows/adviser-input/round-05/engineering-walk-transcript.md` AFTER you complete
 your own M3/M5/M7 walk — your rows must be walked from this pinned tree on your own
 evidence, not inherited from the owner transcript.
-- Scheme you are operating under: https://raw.githubusercontent.com/jstevenjacobs/HE-toolstack/bc73dfce1b714a333ce4e53d4226f6dcf7c9741e/workflows/adviser-input/round-05/single-human-scheme.md
-- Diagram/prose checklist rows you own (M3, M5, M7): https://raw.githubusercontent.com/jstevenjacobs/HE-toolstack/bc73dfce1b714a333ce4e53d4226f6dcf7c9741e/docs/HE-TOOLSTACK-DESIGN-REVIEW.md (§2b, lines ~66-74; note which diagram each row names)
-- The diagrams themselves: https://raw.githubusercontent.com/jstevenjacobs/HE-toolstack/bc73dfce1b714a333ce4e53d4226f6dcf7c9741e/docs/HE-TOOLSTACK-TECHNICAL-DESIGN.md (mermaid blocks; D4=M3, D9=M5, D7/D8=M7; §6.9 backup procedure; §6.10 six-step make-down)
-- Runbooks you must dry-run: TD §11.8 (https://raw.githubusercontent.com/jstevenjacobs/HE-toolstack/bc73dfce1b714a333ce4e53d4226f6dcf7c9741e/docs/HE-TOOLSTACK-TECHNICAL-DESIGN.md lines ~1451-1500, R-1…R-9)
+- Scheme you are operating under: https://raw.githubusercontent.com/jstevenjacobs/HE-toolstack/e7f261bad8f184a9e43cc965603d0b480a4317ca/workflows/adviser-input/round-05/single-human-scheme.md
+- Diagram/prose checklist rows you own (M3, M5, M7): https://raw.githubusercontent.com/jstevenjacobs/HE-toolstack/e7f261bad8f184a9e43cc965603d0b480a4317ca/docs/HE-TOOLSTACK-DESIGN-REVIEW.md (§2b, lines ~66-74; note which diagram each row names)
+- The diagrams themselves: https://raw.githubusercontent.com/jstevenjacobs/HE-toolstack/e7f261bad8f184a9e43cc965603d0b480a4317ca/docs/HE-TOOLSTACK-TECHNICAL-DESIGN.md (mermaid blocks; D4=M3, D9=M5, D7/D8=M7; §6.9 backup procedure; §6.10 six-step make-down)
+- Runbooks you must dry-run: TD §11.8 (https://raw.githubusercontent.com/jstevenjacobs/HE-toolstack/e7f261bad8f184a9e43cc965603d0b480a4317ca/docs/HE-TOOLSTACK-TECHNICAL-DESIGN.md lines ~1451-1500, R-1…R-9)
 
 ## Q1 — M3 walk (D4 ↔ D-15 rev / zero host publication)
 Answer from the diagram text only, then verify against prose: Does D4 show agent→toolserver
