@@ -279,6 +279,9 @@ graph LR
         I6[property-pipeline]
         PG[gate scripts<br/>inside images]
     end
+    subgraph Spawn["Spawn path (D-16, §6.2b)"]
+        SC[spawn-sidecar<br/>sole docker.sock holder<br/>root-equivalent if compromised]
+    end
     subgraph Data["Data plane"]
         HD[(heat-data<br/>authoritative)]
         MI[(minio<br/>promoted immutable)]
@@ -286,6 +289,8 @@ graph LR
     end
     TS -->|INSERT submissions only| Q; TS --> R
     Q --> ADM; Q --> RU
+    RU -->|"spawn/kill: 4-op HTTP (§6.2b)"| SC
+    SC -->|"Docker API via sole socket"| Exec
     RU --> I1 & I2 & I3 & I4 & I5 & I6
     I1 & I2 --> PG
     RU --> HD; PG --> HD; TS --> HD
@@ -316,7 +321,7 @@ graph TB
             subgraph CP["compose project: he-toolstack"]
                 TSc["toolserver container<br/>user: non-root uid 1000"]
                 WEc["workflow-engine container<br/>mounts heat-data rw<br/>NO Docker socket — D-16, FINDING-03"]
-                SCc["spawn-sidecar container<br/>sole /var/run/docker.sock holder<br/>D-16 ACCEPTED 2026-11-16"]
+                SCc["spawn-sidecar container<br/>sole /var/run/docker.sock holder<br/>D-16 ACCEPTED 2026-11-16<br/>root-equivalent if compromised"]
                 MOc["minio container<br/>volume heat-data/minio"]
             end
             J1[job container<br/>one-shot, network_mode none,<br/>bind: heat-data/runs/&lt;id&gt;/work]

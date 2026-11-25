@@ -50,15 +50,37 @@ Operator-side rows: M1, M2, M4, M6, M8, M9 (M3/M5/M7 belong to the council ops w
 | Row | Result |
 |---|---|
 | M1 | PASS |
-| M2 | **DEFECT stands** — D2 sidecar node missing, D3 label missing root-equivalent caveat; fix deferred, row blocks §9 sign-off until re-walked |
+| M2 | **DEFECT stands** — fixes committed (D2 sidecar subgraph, D3 caveat label, label-level); **re-walk owed** against fix commit; row blocks §9 sign-off until re-walked |
 | M4 | PASS under operator-corrected predicate (§2b row erratum `5a73f00`, D-08 pattern) |
 | M6 | PASS (downgrade accepted) |
 | M8 | PASS |
 | M9 | PASS |
 
-## Spot-check phase (pending)
+## Spot-check phase — rules (executed below)
 Operator picks **2 of the 6 rows**; verifies each quoted locator in the pinned tree
 (`https://raw.githubusercontent.com/jstevenjacobs/HE-toolstack/5a24b0c…/<path>` — line
 anchors above) and reports MATCH/MISMATCH. MISMATCH reopens that row. Then the operator
 signs the transcript-approval line and this file is committed as the §9 engineering-walk
 record (with M2's exception noted).
+
+## Spot-check phase — COMPLETE
+Operator picked rows **M2** and **M9**; verified both quote-locators against pinned tree
+`5a24b0c` personally. Reported: M2 — MATCH (D2 contains no spawn-sidecar node; upheld
+defect substantiated; D2 correction warranted). M9 — MATCH (canonical endpoints
+/healthz, /readyz, /deps; exact /health references limited to retirement statements;
+make health is a host-side probe, not an HTTP endpoint). No row reopened.
+
+## Transcript approval (operator, verbatim)
+> Transcript approval: I approve the recorded judgments subject to the separately
+> committed, label-level M2/D3 diagram corrections and subsequent re-walk. This approval
+> does not constitute approval of deployment readiness.
+
+## M2 remediation (label-level, per approval condition)
+Separate commit on `dp/round-05-signoff-scheme`: D2 gains `Spawn path (D-16, §6.2b)`
+subgraph — `spawn-sidecar / sole docker.sock holder / root-equivalent if compromised`,
+edges `runner ->(spawn/kill: 4-op HTTP (§6.2b)) sidecar` and
+`sidecar ->(Docker API via sole socket) Execution plane`; D3 SCc label gains
+`root-equivalent if compromised` (matching D4). No semantic/architecture change —
+labels + edges only, exactly the two logged defects. Gates 27/0 after fix; 9 Mermaid
+blocks intact. **M2 re-walk owed** against the new commit (label-level judgment: does
+each fix carry the required claim — sole-holder + root-equiv in both diagrams).

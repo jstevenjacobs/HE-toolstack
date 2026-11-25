@@ -1,7 +1,7 @@
 {
   "project": "HE-toolstack Phase 2 - Documentation production",
   "phase": 2,
-  "cursor": "PR #15 OPEN (R4 merge instruction pending). Round-05 OPEN on dp/round-05-signoff-scheme: single-human scheme + ops-walk/crosscheck prompts + owner walk template. Next: operator relays prompts to Grok then ChatGPT; owner walk filled by operator; 9-grid fills on archived transcripts. HARD STOP unchanged.",
+  "cursor": "DP-R5-walk2 engineering-walk approved, M2 fix pending re-walk",
   "completed": [
     "P2.0",
     "P2.1",
