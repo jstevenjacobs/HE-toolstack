@@ -1487,7 +1487,7 @@ prohibition: no step a fresh session can't run blind)
   runbook must be executable from the paper alone with zero conversation context.
 - **R-5 spawn channel broken (sidecar is the broken service — round-05 gap fix: former text
   named `make up workflow-engine`, which is the WRONG target):** symptom = every
-  `create_run` returns `500`/`spawn_timeout` in engine logs while `status` calls fail.
+  `create_run` returns `500`/`spawn_timeout` in engine logs while `status` calls fail **pre-restart** (the step-(3) probe below is a post-restart liveness check, not a replay of this symptom).
   (1) `make ps` → identify which of engine vs sidecar is unhealthy. (2) Restart the **sidecar
   only**: `docker compose up -d spawn-sidecar` (scoped; class-C service, §6.10) — the engine
   keeps serving queue while the sidecar returns; restart the engine separately only if IT is
@@ -1495,7 +1495,7 @@ prohibition: no step a fresh session can't run blind)
   API liveness **only** — it can 404 while `create_run` still times out. The failing
   operation must be exercised: one controlled `POST /v1/create_run` with an allowed digest
   under normal sidecar restrictions (§6.2b), confirm the container spawns, then
-  `POST /v1/cancel` (or let it finish) + confirm state cleanup. `make test-smoke` is the
+  `POST /v1/runs/{id}/kill` (the §6.2b kill op — there is no `/v1/cancel`) or let it finish, then follow with a status check + confirm state cleanup. `make test-smoke` is the
   backstop, not this runbook's proof (it is T-01 echo + healthz + down/up, §11.5 — it never
   exercises create_run). (4) If the
   sidecar itself cannot reach `/var/run/docker.sock`: host docker **dependency** check (host action,
