@@ -7,11 +7,18 @@ their own blind spots. Order of operations: (1) walk independently BEFORE readin
 transcript, (2) then diff against it. Your reply is archived verbatim; it must show both
 passes separately or it is invalid for this purpose.
 
-Pinned full SHA `9c578bec4bc0afe116d4ecfeecd36c673fb14149` (branch dp/round-05-signoff-scheme).
+Pinned full SHA `bc73dfce1b714a333ce4e53d4226f6dcf7c9741e` (branch dp/round-05-signoff-scheme).
+
+**Status update (re-pinned 2026-11-24):** re-pinned from `9c578be` to `bc73dfc` after
+the owner walk closed 6/6 PASS. Your blind-falsify pass on the owner rows should
+attempt to break those recorded judgments from this pinned tree — transcript is at
+`workflows/adviser-input/round-05/engineering-walk-transcript.md`; report any locator
+mismatch or counter-example that survives, but do NOT read it before forming your own
+M5/M7 independent pass.
 Doc roots: scheme `workflows/adviser-input/round-05/single-human-scheme.md`; docs under `docs/`
 — DESIGN-REVIEW (§2b rows M1–M9, §9), TECHNICAL-DESIGN (mermaid D1–D9; §6.9 backup; §6.10
 six-step down; §11.8 runbooks R-1…R-9; §8 write-order). Raw-URL base:
-https://raw.githubusercontent.com/jstevenjacobs/HE-toolstack/9c578bec4bc0afe116d4ecfeecd36c673fb14149/
+https://raw.githubusercontent.com/jstevenjacobs/HE-toolstack/bc73dfce1b714a333ce4e53d4226f6dcf7c9741e/
 
 ## Q1 — Independent adversarial pass on M5 and M7 (the two false-confidence rows named in R-02)
 
