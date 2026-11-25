@@ -171,6 +171,43 @@ conditions: OQ-5 resolved and OQ-1/OQ-4 ruled before M0 build starts; FINDING-04
 accepted as M0 evidence work, not document defects. *(r13 note: OQ-1 RULED CLOSED and
 OQ-5 CLOSED since written; OQ-4 D-06-half remains reviewer-side before M0.)*
 
+### §9 exception annotation — single-human ops-reviewer scheme (2026-11-24)
+
+**Registered structural exception (owner ruling 2026-11-24):** the project has exactly one
+human participant; the §9 engineering-reviewer and ops-reviewer rows cannot be filled by
+independent humans. Under the registered single-human scheme
+(`workflows/adviser-input/round-05/single-human-scheme.md`), these rows are filled by
+**council transcripts** (Grok blind ops-walk + ChatGPT blind falsification/cross-check,
+quorum 2-of-2, verbatim archives under `workflows/adviser-input/round-05/`) plus the
+**owner's interactive walk** (`engineering-walk-transcript.md`, CLOSED 6/6 PASS, re-walks
+MATCH at every pin). This annotation is the disposition of R-02's §9 finding.
+
+**Verdicts as filled under this scheme:** engineering row — owner walk 6/6 PASS +
+ChatGPT blind confirmation (zero surviving counter-examples to the six owner rows).
+Ops row — **approve with exceptions** at final pin (see below); not an independent-human
+approval and never representable as one.
+
+**Ops-row exceptions (carried, not converted to passes):**
+1. Runbook gaps R-4 (no concrete restore procedure), R-5 (wrong/undefined service target —
+   `make up workflow-engine` where the restarted service is `spawn-sidecar`), R-7
+   (archive destination undefined) — found independently by both council reviewers;
+   owner ruling 2026-11-24: accept as recorded exceptions; repair is M0-gated work
+   (HARD STOP §10), not a document fix.
+2. Scenario-supply protocol deviation (self-disclosed by ChatGPT): reviewers authored
+   their own dry-run scenarios; comparison was post-hoc divergent-set analysis, not
+   literal cross-supplied re-runs. Owner ruling: accepted exception; coverage is
+   documented as divergent (3 shared stalls R-4/5/7 + 3 divergent R-2/6/9).
+3. Council validity limit (restated verbatim from ChatGPT Q3): a council reviewer is
+   independent of artifact authorship, not an independent human or an authority to accept
+   operational risk; the owner alone retains residual-risk acceptance.
+
+**Not closable by any review (unchanged human/M0 gates):** T-01…T-24 execution (runtime
+evidence), §2b + QA §5 sign-offs as *human* acts, OQ-9 off-host L4/L5 durability (manual
+web read-back is the only evidence), F-1 authN/Z beyond network membership (compromised-
+sidecar root-equivalence stands). Nothing in this annotation or the council record
+constitutes deployment approval.
+
+
 ## 10. Independent review record (rounds 12–13, r13)
 
 A **read-only delegated independent reviewer** (not the authoring agent) audited the r12
