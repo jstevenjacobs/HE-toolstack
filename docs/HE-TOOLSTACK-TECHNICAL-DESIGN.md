@@ -346,7 +346,7 @@ engine as "ALTERNATIVE") is removed: the engine never sees a socket under any op
 ```mermaid
 graph LR
     AGENT[agent container<br/>default bridge +<br/>connected to he-agent net] -- "HTTP http://toolserver:8100<br/>(he-agent net member only; zero publish [V])" --> TS[toolserver]
-    OPS[operator ssh :2222] -- "compose/CLI + :9001 console" --> STACK[compose project]
+    OPS[operator ssh :2222] -- "compose/CLI + :9001 console<br/>(loopback bind 127.0.0.1 [proposal], §11.6)" --> STACK[compose project]
     TS -- "HTTP in-project :8200 (bridge he-net)" --> WE[workflow-engine]
     WE -- "spawn: 4-op HTTP<br/>(D-16 ACCEPTED 2026-11-16)" --> SC[spawn-sidecar<br/>he-internal only;<br/>sole docker.sock holder;<br/>root-equivalent if compromised] -- "Docker API (socket)" --> DE[host engine]
     WE -- "S3 API :9000 in-net" --> MO[minio]
@@ -908,7 +908,7 @@ sequenceDiagram
     participant CP as compose (class C)
     MD->>WE: step 1 compose stop -t grace<br/>SIGTERM: stop claiming
     WE->>SC: step 2 POST /v1/runs/id kill<br/>(engine has NO socket, D-16)
-    SC->>JB: SIGTERM running jobs
+    SC->>JB: SIGTERM running jobs → wait ≤<br/>TS_SHUTDOWN_GRACE_SECONDS=60 [P]<br/>→ re-issue kill (§6.10 step 2)
     JB-->>WE: exit codes via status/logs API
     WE->>WE: step 3 record interrupted/killed<br/>write-ahead BEFORE exit
     WE->>WE: engine exits (drained)
@@ -1794,13 +1794,15 @@ sequenceDiagram
 sequenceDiagram
     participant H as host ops timer robocopy driver
     participant HD as heat-data ext4 authoritative
-    participant C as OneDrive root candidate then dated dir on NTFS
+    participant C as OneDrive root $ROOT (§6.9)<br/>candidate then dated dir on NTFS
     participant M as minio versioned bucket
     participant N as fresh or rebuilt env
     H->>HD: quiesce pause file then wait active jobs to zero else abort
     H->>HD: sqlite online backup plus cp -a plus manifest into ext4 snapshot
+    H->>HD: validate source snapshot §6.9.2 step 3<br/>PRAGMA integrity_check + quick_check<br/>ledger parse + sha256 set → manifest.src
     H->>C: robocopy snapshot into candidate dir L2 local copy
     H->>C: verify every destination digest then write DONE.json
+    H->>C: interrupted transfer without valid DONE.json<br/>is not a backup → resume per .copied markers<br/>or quarantine 14 d (§6.9.2 step 8)
     H->>C: publish rename within NTFS volume into dated runid dir
     Note over C: OneDrive upload completion NOT provable locally L4 L5 gap OQ-9 manual web read-back is the L5 evidence
     H->>M: version export rclone s3-versions payloads plus mc ls versions manifest mc mirror withdrawn

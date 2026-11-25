@@ -79,3 +79,17 @@ locators) accepted — SHA distinction already preserved in transcript §Status.
   mismatch.
 - Neither reviewer's summary claims deployment approval; both disclaim independent-human
   risk acceptance. Scheme validity limit preserved.
+
+## Ruling + fixes (2026-11-24, operator: "I agree with your recommendations")
+
+- M3: D4 :9001 console edge relabeled `(loopback bind 127.0.0.1 [proposal], §11.6)`. D3 LB
+  left unqualified (finding named D4 only; D3's 127.0.0.1 mirrors §11.6 proposal row).
+- M5: D9 step-2 label extended `SIGTERM → wait ≤ TS_SHUTDOWN_GRACE_SECONDS=60 [P] →
+  re-issue kill (§6.10 step 2)` (annotation, no new interaction); §2b M5 parenthetical
+  replaced with the six §6.10 steps (erratum marker).
+- M7: D8 gains validate-source-snapshot (§6.9.2 step 3) and interrupted-transfer
+  resume/quarantine (§6.9.2 step 8) messages; participant relabeled `OneDrive root $ROOT
+  (§6.9)` — §-pointer form, literal user path not embedded.
+All fixes label/additive-message level; no prose semantics, API, or security changes.
+Gates 27/0, 9 mermaid blocks. Re-walk + re-pin to follow; then batched ChatGPT follow-up
+(Q2 Grok-scenario comparison + fix verification at new pin).
