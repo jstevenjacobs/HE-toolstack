@@ -37,7 +37,7 @@ Result row: runbook ID, scenario, reviewer, verdict, defects. Ops row signs only
 ## Sequencing (what unblocks what)
 
 1. Council ops-walk (M3/M5/M7) + council runbook dry-runs → ops transcript archive.
-2. Your engineering walk (M1–M2, M4, M6, M8–M9) + your scenarios for any runbooks you want the council to re-dry-run.
+2. Your engineering walk (M1–M2, M4, M6, M8–M9) + your scenarios for any runbooks you want the council to re-dry-run — executed via INTERACTIVE PROTOCOL v2 (engineering-walk-interactive.md, DP-R5 amendment 2026-11-24: operator-requested; agent locates evidence under pre-registered predicates + mandatory counter-example search, operator answers yes/no, picks 2 of 6 rows for manual spot-check).
 3. §9 filled: owner row (you), engineering row (you, exception-cited), ops row (council, exception-cited) — verdicts "approve w/ exceptions" citing this file.
 4. §2b 🧑 rows tick as the corresponding walks land; M3/M5/M7 tick only on the council transcript.
 

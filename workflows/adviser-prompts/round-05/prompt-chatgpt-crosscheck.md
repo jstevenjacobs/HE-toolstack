@@ -14,6 +14,8 @@ six-step down; §11.8 runbooks R-1…R-9; §8 write-order). Raw-URL base:
 https://raw.githubusercontent.com/jstevenjacobs/HE-toolstack/9c578bec4bc0afe116d4ecfeecd36c673fb14149/
 
 ## Q1 — Independent adversarial pass on M5 and M7 (the two false-confidence rows named in R-02)
+
+**Amendment 2026-11-24 (operator-requested):** the owner's engineering walk (M1, M2, M4, M6, M8, M9) is now executed INTERACTIVELY — the agent pre-locates evidence, the operator answers yes/no. Your Q1 duty therefore EXTENDS to all six engineering rows: for each, search the pinned tree for a counter-example the interactive walk would likely miss (a quote pair that technically matches but conflicts elsewhere; a second location that contradicts). Report per row: CONFIRM or COUNTER-EXAMPLE FOUND (with locators). Do not read the operator's walk transcript — your falsification pass is blind to it, exactly as for M5/M7.
 Do this from the pinned tree WITHOUT previewing Grok's answer. For M5: is any of the six
 `make down` steps reordered, merged, or dropped in D9 vs NFR-01/§6.10 — quote both artifacts.
 For M7: does any backup-path or digest-verify step in §6.9 have no diagram counterpart (or

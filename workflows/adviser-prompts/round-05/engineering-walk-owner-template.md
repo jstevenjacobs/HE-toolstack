@@ -1,5 +1,10 @@
 # Owner engineering walk — TEMPLATE (fill during the walk, one session, one sitting)
 
+> **[SUPERSEDED 2026-11-24]** Operator reported this fill-in form too complicated to complete
+> efficiently/accurately. Use `engineering-walk-interactive.md` (interview protocol v2)
+> instead. Retained as manual fallback only.
+
+
 Protocol: single-human-scheme.md §Walk-protocol (pinned SHA, quote-or-invalid, r12 pre-fill
 has zero credit). Execute in a NEW session against a checked-out pinned tree. One row per
 M-item; a row passes only with BOTH a prose locus (§ + quoted phrase) and a diagram element
