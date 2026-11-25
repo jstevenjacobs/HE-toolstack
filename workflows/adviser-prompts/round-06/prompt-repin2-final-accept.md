@@ -5,7 +5,7 @@ tree at the new pin (URLs below). Both of you ruled APPROVE-WITH-CHANGES with ex
 residual items between you (Grok F1; ChatGPT F1+F2). All three are claimed fixed at the pin.
 This is a final ACCEPT/REOPEN on those three diffs — nothing else opens.
 
-**HARD STOP (TD §10):** paper-only review. No runtime claims, no deployment or
+**HARD STOP (DESIGN-REVIEW §10):** paper-only review. (HARD STOP is defined in DESIGN-REVIEW §10, not TD §10 — citation clarified per ChatGPT re-pin-2 note.) No runtime claims, no deployment or
 ticket-execution authorization. Quote the pinned tree verbatim.
 
 - **Pin:** `9e382314c4e4ca9238303e852a1fca12e9b07953` (head of `dp/round-06-runbook-repairs`, PR #16)
