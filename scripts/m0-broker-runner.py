@@ -1,31 +1,35 @@
 #!/usr/bin/env python3
-"""m0-broker-runner.py — M0 interview protocol §3.3/§3.4 plan-gated broker (rev-4).
+"""m0-broker-runner.py — M0 interview protocol §3.3/§3.4 plan-gated broker (rev-5).
 
 Runs as the m0broker account (systemd). Fails CLOSED everywhere: an unverifiable plan
-authorizes nothing; unchecked git/push failures stop the loop rather than continue on
-stale state; a request is only marked processed after its record is committed AND pushed
-successfully.
+authorizes nothing; unchecked git failures stop the loop rather than continue on stale
+state; nothing is ever "processed" until its evidence is durably stored AND pushed.
 
-rev-4 repairs (ChatGPT round-3 P0/P1 at cf4a804):
-- Plan AUTHENTICATION: open.json must carry an OpenSSH detached signature (open.sig)
-  verifiable against the owner-pinned allowed_signers file (`ssh-keygen -Y verify`,
-  namespace "file"). A matching digest is consistency; the signature is authorization.
-  Unverifiable plan -> nothing executes; every request is refused on-record.
-- Request digest is COMPUTED by the runner from argv (canonical sha256); the
-  caller-supplied digest is never trusted, only recorded.
-- Every git/push result is checked; repeated push failure exits non-zero so systemd
-  restarts under the unit's backoff (fail visible, not silent).
-- Processed-marking happens only after a successful push (a failed evidence publish
-  cannot make requests disappear).
-- Capture records now include the raw request line and digests of plan-declared
-  artifact paths (missing artifacts are recorded as MISSING, never omitted).
-- Commits are expected to be GPG/SSH-signed via broker git config (configured at
-  provisioning); the council verifies commit authorship with `git verify-commit`.
+rev-5 repairs (ChatGPT re-pin-3 REJECT at 1ce2b3c — the five P0s):
+- DURABLE REQUEST STATE: every request carries a lifecycle file under
+  <state_dir>/state (started BEFORE exec, executed after, published after a
+  confirmed push). The in-memory processed-set is gone; a systemd restart cannot
+  replay an executed operation.
+- UNPROVEN semantics: a request whose state reads "started" at recovery time
+  (crash during/after exec, outcome uncertain) NEVER auto-reruns. The broker
+  writes an UNPROVEN refusal record; a second attempt requires a separate,
+  explicit owner recovery decision.
+- Evidence durability: record/refusal files are authored in broker-owned
+  <state_dir> FIRST and copied into the evidence worktree at publish time, so
+  `git reset --hard` or a failed push can never destroy unpublished evidence.
+- No silent drops: every queue line gets a broker-committed disposition —
+  valid+authorized executes; valid+unauthorized refuses; malformed JSON and
+  missing/invalid request IDs produce invalid-request refusal records.
+- Real --once mode (default: exactly one fetch/process/publish cycle, then exit;
+  exit 3 if publication is pending). --daemon loops. Rev-4's prompt claimed
+  --once existed; it did not — correction on record, ChatGPT re-pin-3 §3.
+- Owner principal is read from broker config, matching §3.3 (rev-4 doc said the
+  plan declared it; the protocol text is corrected to match this code).
 
 Not installed or run until protocol ACCEPT and owner-run provisioning (m0-broker-setup.sh).
 """
 from __future__ import annotations
-import argparse, datetime as dt, hashlib, json, subprocess, sys, time
+import argparse, datetime as dt, hashlib, json, os, subprocess, sys, time
 from pathlib import Path
 
 PLAN_PATH = "workflows/m0-plans/open.json"
@@ -34,6 +38,7 @@ QUEUE_PATH = "workflows/m0-evidence/requests.jsonl"
 RECORD_DIR = "workflows/m0-evidence/records"
 REFUSAL_DIR = "workflows/m0-evidence/refusals"
 PUSH_FAIL_LIMIT = 5
+STATE_DEFAULT = "/opt/m0-broker/state"
 
 def now() -> str:
     return dt.datetime.now(dt.timezone.utc).isoformat()
@@ -49,6 +54,45 @@ def git_checked(repo: str, *args: str) -> str:
 
 def canonical_sha256(obj) -> str:
     return hashlib.sha256(json.dumps(obj, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+def durable_write(path: Path, obj) -> None:
+    """Atomic write: temp file in the same directory, then rename."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(obj, indent=2))
+    os.replace(tmp, path)
+
+class Ledger:
+    """Durable per-request state + evidence, OUTSIDE the git worktree (a
+    `reset --hard` between passes must never destroy execution history)."""
+    def __init__(self, root: str):
+        self.root = Path(root)
+    def state(self, rid: str) -> Path:
+        return self.root / "state" / f"{rid}.json"
+    def record(self, rid: str) -> Path:
+        return self.root / "records" / f"{rid}.json"
+    def refusal(self, rid: str) -> Path:
+        return self.root / "refusals" / f"{rid}.json"
+    def load(self, rid: str) -> dict | None:
+        p = self.state(rid)
+        return json.loads(p.read_text()) if p.exists() else None
+    def save(self, rid: str, status: str, note: str = "", req_hash: str = "") -> None:
+        durable_write(self.state(rid), {
+            "id": rid, "status": status, "updated": now(), "note": note,
+            "request_line_sha256": req_hash})
+    def pending(self) -> list[str]:
+        """IDs with a local disposition not yet confirmed pushed."""
+        out = []
+        d = self.root / "state"
+        if d.is_dir():
+            for f in d.glob("*.json"):
+                try:
+                    st = json.loads(f.read_text())
+                except json.JSONDecodeError:
+                    continue
+                if st.get("status") in ("executed", "dispositioned"):
+                    out.append(st["id"])
+        return out
 
 def verify_plan(repo: str, allowed_signers: Path, principal: str) -> dict:
     """Return {commands:{digest: {argv, artifacts}}, wave, plan_digest} ONLY if the
@@ -71,7 +115,6 @@ def verify_plan(repo: str, allowed_signers: Path, principal: str) -> dict:
     for c in plan.get("commands", []):
         argv = c.get("argv")
         if isinstance(argv, list) and all(isinstance(x, str) for x in argv):
-            # runner computes the authoritative digest itself
             commands[canonical_sha256(argv)] = {"argv": argv, "artifacts": c.get("artifacts", [])}
         else:
             return {"commands": {}, "wave": None, "why": "plan entry argv malformed"}
@@ -98,23 +141,148 @@ def load_config() -> dict:
             return {}
     return {}
 
+def refuse(L: Ledger, rid: str, reason: str, req_hash: str = "",
+           extra: dict | None = None) -> None:
+    """Durably author a refusal record + mark the request dispositioned. Refusals
+    have no side effects, so this is safe to record before any push."""
+    body = {"id": rid, "refused_at": now(), "request_line_sha256": req_hash,
+            "reason": reason}
+    if extra:
+        body.update(extra)
+    durable_write(L.refusal(rid), body)
+    L.save(rid, "dispositioned", note=reason, req_hash=req_hash)
+    log(f"REFUSED {rid}: {reason}")
+
+def run_pass(a, allowed_signers: Path, L: Ledger) -> int:
+    """One fetch/process/publish cycle. Returns 0 ok, 2 fetch/reset failure,
+    3 publication still pending (caller retries or exits)."""
+    try:
+        git_checked(a.repo, "fetch", "origin", a.branch)
+        git_checked(a.repo, "reset", "--hard", f"origin/{a.branch}")
+    except RuntimeError as e:
+        log(f"PASS FAIL (fetch/reset): {e}")
+        return 2
+    plan = verify_plan(a.repo, allowed_signers, a.owner_principal)
+    q = Path(a.repo) / QUEUE_PATH
+    lines = q.read_text().splitlines() if q.exists() else []
+
+    for raw in lines:
+        if not raw.strip():
+            continue
+        req_hash = hashlib.sha256(raw.encode()).hexdigest()
+        # --- every line gets a disposition: nothing disappears silently (rev-5 P0) ---
+        try:
+            req = json.loads(raw)
+            if not isinstance(req, dict):
+                raise json.JSONDecodeError("not an object", raw, 0)
+        except json.JSONDecodeError as e:
+            rid = f"invalid-{req_hash[:16]}"
+            if not L.load(rid):
+                refuse(L, rid, f"invalid-request: malformed queue line ({e})", req_hash)
+            continue
+        rid = req.get("id")
+        if not isinstance(rid, str) or not rid or not rid.replace("-", "").replace("_", "").isalnum():
+            rid = f"noid-{req_hash[:16]}"
+            if not L.load(rid):
+                refuse(L, rid, "invalid-request: missing or invalid request id", req_hash)
+            continue
+        st = L.load(rid)
+        if st and st.get("status") in ("started",):
+            # outcome UNCERTAIN after a crash: never re-execute automatically.
+            refuse(L, rid,
+                   "UNPROVEN: execution was started before a broker restart and its outcome "
+                   "is uncertain; re-execution requires a separate explicit owner recovery "
+                   "decision (§3.3 rev-5)", req_hash,
+                   extra={"unproven": True, "started_note": st.get("note", "")})
+            continue
+        if st and st.get("status") in ("executed", "dispositioned", "published"):
+            continue  # already decided; publish step handles pending ones
+        argv = req.get("argv")
+        own_digest = canonical_sha256(argv) if isinstance(argv, list) else ""
+        entry = plan["commands"].get(own_digest)
+        if entry is None:
+            reason = plan.get("why") or "digest not in owner-signed open plan (§3.3)"
+            refuse(L, rid, reason, req_hash, extra={
+                "runner_computed_digest": own_digest,
+                "caller_supplied_digest": req.get("command_digest")})
+            continue
+        # execution lifecycle: started BEFORE the subprocess (durable)
+        started = now()
+        durable_note = f"argv={json.dumps(entry['argv'])}"
+        L.save(rid, "started", note=durable_note, req_hash=req_hash)
+        err = None
+        try:
+            cp = subprocess.run(entry["argv"], capture_output=True, text=True,
+                                timeout=3600, cwd=a.repo)
+            exit_code, stdout, stderr = cp.returncode, cp.stdout, cp.stderr
+        except subprocess.TimeoutExpired:
+            exit_code, stdout, stderr, err = None, "", "", "TIMEOUT exceeded 3600s"
+        durable_write(L.record(rid), {
+            "id": rid, "wave": plan["wave"], "plan_digest": plan.get("plan_digest"),
+            "signed_by": plan.get("signed_by"),
+            "started": started, "ended": now(),
+            "request_line_sha256": req_hash, "request_raw": raw,
+            "argv": entry["argv"], "runner_computed_digest": own_digest,
+            "caller_supplied_digest": req.get("command_digest"),
+            "exit": exit_code, "stdout": stdout, "stderr": stderr,
+            "error": err,
+            "artifact_digests": digest_artifacts(Path(a.repo), entry["artifacts"])})
+        L.save(rid, "executed", note="record written; publication pending",
+               req_hash=req_hash)
+        log(f"EXECUTED {rid} exit={exit_code}")
+
+    # ---- publish: copy durable evidence into the worktree, commit, push ----
+    pend = L.pending()
+    if not pend:
+        return 0
+    for rid in pend:
+        for src, reldir in ((L.record(rid), RECORD_DIR), (L.refusal(rid), REFUSAL_DIR)):
+            if src.exists():
+                dest = Path(a.repo) / reldir / f"{rid}.json"
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                dest.write_text(src.read_text())
+    paths = [str(Path(a.repo) / d) for d in (RECORD_DIR, REFUSAL_DIR)
+             if (Path(a.repo) / d).exists()]
+    if not paths:
+        return 3
+    try:
+        git_checked(a.repo, "add", *paths)
+        staged = subprocess.run(("git", "-C", a.repo, "diff", "--cached", "--quiet"),
+                                capture_output=True, text=True)
+        if staged.returncode != 0:  # rc=1 means changes staged — the normal path
+            git_checked(a.repo, "commit",
+                        "-m", f"broker({a.branch}): {len(pend)} records {now()}")
+        git_checked(a.repo, "push", "origin", a.branch)
+    except RuntimeError as e:
+        log(f"evidence publication FAILED (state kept, will retry): {e}")
+        return 3
+    for rid in pend:
+        st = L.load(rid) or {"id": rid}
+        durable_write(L.state(rid), {**st, "status": "published", "updated": now()})
+    log(f"published {len(pend)} dispositions (durable, confirmed push)")
+    return 0
+
 def main() -> None:
     c = load_config()
     ap = argparse.ArgumentParser()
     ap.add_argument("--repo", default=c.get("repo", "/opt/m0-broker/evidence"))
     ap.add_argument("--branch", default=c.get("branch", "m0-evidence"))
     ap.add_argument("--poll", type=int, default=c.get("poll", 10))
+    ap.add_argument("--state-dir", default=c.get("state_dir", STATE_DEFAULT))
     ap.add_argument("--allowed-signers", default=c.get(
         "allowed_signers", str(Path.home() / ".ssh" / "m0-allowed-signers")))
     ap.add_argument("--owner-principal", default=c.get("owner_principal", ""))
-    ap.add_argument("--daemon", action="store_true", help="loop mode (systemd)")
+    mode = ap.add_mutually_exclusive_group()
+    mode.add_argument("--daemon", action="store_true", help="loop mode (systemd)")
+    mode.add_argument("--once", action="store_true",
+                      help="exactly one fetch/process/publish cycle, then exit (default)")
     ap.add_argument("--verify", action="store_true",
                     help="self-check deps and plan-verify path, then exit 0/1")
     a = ap.parse_args()
     allowed_signers = Path(a.allowed_signers)
+    L = Ledger(a.state_dir)
 
     if a.verify:
-        # Provisioning gate: everything the loop needs must exist and work.
         problems = []
         if not a.owner_principal:
             problems.append("owner_principal not configured")
@@ -122,123 +290,40 @@ def main() -> None:
             problems.append(f"allowed_signers missing: {allowed_signers}")
         if not Path(a.repo).is_dir():
             problems.append(f"evidence repo clone missing: {a.repo}")
-        else:
+        try:
+            Path(a.state_dir).mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            problems.append(f"state_dir not writable: {a.state_dir} ({e})")
+        if Path(a.repo).is_dir():
             v = verify_plan(a.repo, allowed_signers, a.owner_principal)
-            # An absent/unsigned plan is a VALID state before Wave 0 (plan is
-            # drafted during Wave 0); the check is that the verify PATH works.
             if v.get("why", "").startswith("plan signature FAILED"):
                 problems.append("plan signature verification path errors")
         for p in problems:
             log(f"VERIFY FAIL: {p}")
         if problems:
             sys.exit(1)
-        log("VERIFY OK: config, signer file, repo clone, verification path")
+        log("VERIFY OK: config, signer file, repo clone, state dir, verification path")
         return
 
-    processed: set[str] = set()
-    push_failures = 0
-    passes = 0
-    max_passes = 2 if not a.daemon else 10**9
-    while passes < max_passes:
-        passes += 1
-        try:
-            git_checked(a.repo, "fetch", "origin", a.branch)
-            git_checked(a.repo, "reset", "--hard", f"origin/{a.branch}")
-        except RuntimeError as e:
-            push_failures += 1
-            log(f"FATAL loop: {e}")
-            if push_failures >= PUSH_FAIL_LIMIT:
-                sys.exit(2)   # systemd restarts with backoff; never run on unverifiable state
-            time.sleep(a.poll * 3)
-            continue
-
-        plan = verify_plan(a.repo, allowed_signers, a.owner_principal)
-        q = Path(a.repo) / QUEUE_PATH
-        batch = []
-        if q.exists():
-            for line in q.read_text().splitlines():
-                try:
-                    req = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                rid = req.get("id")
-                if rid and rid not in processed:
-                    batch.append((line, req))
-
-        if not batch:
-            time.sleep(a.poll)
-            continue
-
-        authored = 0
-        for raw_line, req in batch:
-            rid, argv = req["id"], req.get("argv")
-            req_hash = hashlib.sha256(raw_line.encode()).hexdigest()
-            # authoritative digest computed HERE, from the argv the runner would run
-            own_digest = canonical_sha256(argv) if isinstance(argv, list) else ""
-            entry = plan["commands"].get(own_digest)
-            if entry is None:
-                reason = plan.get("why") or "digest not in owner-signed open plan (§3.3)"
-                dest = Path(a.repo) / REFUSAL_DIR / f"{rid}.json"
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                dest.write_text(json.dumps({
-                    "id": rid, "refused_at": now(), "request_line_sha256": req_hash,
-                    "runner_computed_digest": own_digest,
-                    "caller_supplied_digest": req.get("command_digest"),
-                    "reason": reason,
-                }, indent=2))
-                authored += 1
-                log(f"REFUSED {rid}: {reason}")
-                continue
-            started = now()
-            err = None
-            try:
-                cp = subprocess.run(entry["argv"], capture_output=True, text=True,
-                                    timeout=3600, cwd=a.repo)
-                exit_code, stdout, stderr = cp.returncode, cp.stdout, cp.stderr
-            except subprocess.TimeoutExpired:
-                exit_code, stdout, stderr, err = None, "", "", "TIMEOUT exceeded 3600s"
-            dest = Path(a.repo) / RECORD_DIR / f"{rid}.json"
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            dest.write_text(json.dumps({
-                "id": rid, "wave": plan["wave"], "plan_digest": plan.get("plan_digest"),
-                "signed_by": plan.get("signed_by"),
-                "started": started, "ended": now(),
-                "request_line_sha256": req_hash, "request_raw": raw_line,
-                "argv": entry["argv"], "runner_computed_digest": own_digest,
-                "caller_supplied_digest": req.get("command_digest"),
-                "exit": exit_code, "stdout": stdout, "stderr": stderr,
-                "error": err,
-                "artifact_digests": digest_artifacts(Path(a.repo), entry["artifacts"]),
-            }, indent=2))
-            authored += 1
-
-        paths = [str(Path(a.repo) / d) for d in (RECORD_DIR, REFUSAL_DIR)
-                 if (Path(a.repo) / d).exists()]
-        if not paths:
-            time.sleep(a.poll)
-            continue
-        git_checked(a.repo, "add", *paths)
-        # rc=1 from `diff --cached --quiet` means "staged changes exist" — not an error.
-        staged = subprocess.run(("git", "-C", a.repo, "diff", "--cached", "--quiet"),
-                                capture_output=True, text=True)
-        if staged.returncode == 0:
-            time.sleep(a.poll)
-            continue   # nothing actually staged (e.g. race) — do not mark processed
-        try:
-            git_checked(a.repo, "commit",
-                        "-m", f"broker({a.branch}): {authored} records {now()}")
-            git_checked(a.repo, "push", "origin", a.branch)
-        except RuntimeError as e:
-            push_failures += 1
-            log(f"evidence push FAILED ({push_failures}/{PUSH_FAIL_LIMIT}): {e}")
-            if push_failures >= PUSH_FAIL_LIMIT:
-                sys.exit(3)   # visible failure; requests stay unprocessed -> retried on restart
-            time.sleep(a.poll * 3)
-            continue
-        push_failures = 0
-        for _, req in batch:
-            processed.add(req["id"])   # only now: evidence is published
-        log(f"published {authored} records; processed={len(processed)}")
+    if a.daemon:
+        push_fails = 0
+        while True:
+            rc = run_pass(a, allowed_signers, L)
+            if rc == 2:
+                push_fails += 1
+                if push_fails >= PUSH_FAIL_LIMIT:
+                    sys.exit(2)   # visible failure; systemd backoff restart
+                time.sleep(a.poll * 3)
+            elif rc == 3:
+                push_fails += 1
+                if push_fails >= PUSH_FAIL_LIMIT:
+                    sys.exit(3)
+                time.sleep(a.poll * 3)
+            else:
+                push_fails = 0
+                time.sleep(a.poll)
+    else:
+        sys.exit(run_pass(a, allowed_signers, L))
 
 if __name__ == "__main__":
     main()

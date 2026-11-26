@@ -1,10 +1,11 @@
-# M0 Interview Protocol (Round-07) — rev-4
+# M0 Interview Protocol (Round-07) — rev-5
 
 **Purpose.** Progress through the M0 gate with the human operator contributing only judgment (plus the bounded owner-run cutover sequence, §3.1), never mechanical labor. Every mechanical act — typing commands, running drills, hashing outputs, drafting evidence — runs through the plan-gated broker (§3) or is verified by the council. This protocol is a PROCESS design: it changes no ticket, no gate, no §9 row, no D-number, grants no authorization, and changes no council standard (evidence rules, 2/2 verdicts, three-state discipline, §9 exceptions, DESIGN-REVIEW §10 HARD STOP all unchanged). It defines who does what during M0 execution and what counts as evidence. The operator's total contribution across all of M0 is: ~20 sentences of authority (one per approval/ruling/signature, verbatim), one cold-session paste plus one challenge response, one archive fetch, and the bounded owner-run cutover sequence with the owner's own hands (§3.1, counted honestly in §8). Nothing else typed into a shell, nothing manually assembled.
 
 **rev-2.** Council round-1 at pin `fd024d8f`: Grok ACCEPT-WITH-CHANGES (amendments 1–4) and ChatGPT ACCEPT-WITH-CHANGES (amendments 1–5). All adopted; source replies in `workflows/adviser-input/round-07/`.
 **rev-3.** Council round-2 at pin `2951d35`: Grok ACCEPT (amendments 1–4 verified adopted; §3 residual accepted as bounded to the single-operator threat model) + ChatGPT ACCEPT-WITH-CHANGES (Q3: §3 must specify an execution broker + independently controlled capture so Hermes cannot control the evidence boundary, plus a bypass-detection test). Rev-3 implements that design on existing infrastructure: a dedicated m0broker account, plan-gated execution, evidence-repo write separation, §3.6 cutover test — and keeps Grok's limitation statement as §3.8. Nothing else in the protocol changes. Rev-3 goes to council re-verification; both members must ACCEPT the same pin.
 **rev-4.** Council re-pin-2 at pin `cf4a804`: Grok **ACCEPT** (§3.8 limitation preserved; §8 labor honesty accepted; Q4 sequencing confirmed) + ChatGPT **REJECT** — architecture accepted, implementation rejected: plan authorization was a recomputed digest rather than a verified owner signature, runner failure paths unchecked, evidence could fail to publish silently, setup labor understated, credential revocation unproven. Rev-4 is that narrow implementation repair, per ChatGPT's own instruction ("no architectural redesign… no second machine, TPM, or remote-attestation infrastructure"). All seven required repairs are implemented and exercised by `scripts/qa/test_broker_p0.py` (8/8 green, real `ssh-keygen -Y` signatures + real git remotes, no mocks). Source replies archived in `workflows/adviser-input/round-07/`. Rev-4 goes to re-pin-3; both members must ACCEPT the same pin.
+**rev-5.** Council re-pin-3 at pin `1ce2b3c`: Grok **ACCEPT — stands at this pin** (§3.8 substance unchanged; every rev-4 delta assessed as implementation repair inside the accepted architecture; no change required) + ChatGPT **REJECT — narrower** (architecture, §3.8, plan authorization, capture fields all ACCEPTED items; five implementation P0s block: in-memory processed-set ⇒ replay after restart; no uncertain-execution recovery; blanket authorized_keys emptying could strand owner access; per-fingerprint re-probe promised not implemented; malformed queue lines vanish silently; plus P1s: §6 labor-count inconsistency, `--once` claimed but absent — a false claim in the re-pin-3 prompt, recorded honestly — public retention repo unprotected). Rev-5 is the targeted reliability repair ChatGPT recommended: durable execution-state lifecycle (`started`/`executed`/`published`, UNPROVEN on uncertain outcomes, never automatic re-execution), disposition-for-every-line, selective by-fingerprint revocation with declared owner recovery + per-credential verification record, real `--once`, public-repo protection contract, §6 count fixed. Test suite expanded to 19 assertions, all green. Source replies archived in `workflows/adviser-input/round-07/`. Rev-5 goes to re-pin-4; both members must ACCEPT the same pin.
 
 **Precedent.** This is the round-05 interview pattern (engineering walk: one line per
 row, transcript pinned, council cross-examined) extended from paper rows to live M0
@@ -81,7 +82,7 @@ protocol adopts Grok's stricter reading: protocol ACCEPT alone binds nothing; ev
 wave's answer/evidence pack, including Wave 0's rulings, is itself council-validated
 before it binds.
 
-## 3. Evidence capture: broker architecture (rev-4; ChatGPT re-pin-2 implementation repair at `cf4a80…`)
+## 3. Evidence capture: broker architecture (rev-5; ChatGPT re-pin-3 reliability repair at `1ce2b3c…`)
 
 Round-2 finding adopted: shell telemetry plus an externally pinned digest makes
 submitted records tamper-evident but does NOT prove complete capture — an executor that
@@ -102,10 +103,18 @@ phase 2; generates the broker-only GitHub deploy key, which the owner registers 
 write access to the evidence repo's broker branch and proves with `git ls-remote`).
 Phase 2 (`--confirm-cutover`) lists EVERY authorized_keys entry on the host by
 fingerprint with its source file — no name-substring matching — and, only after the
-owner re-runs it with `M0_CUTOVER_CONFIRMED=yes`, removes ALL of them: post-cutover the
-owner is the sole key-holder, so no Hermes credential can survive being missed by a
-pattern. Revocation is then PROVEN, not assumed: §3.6(e) re-attempts the Hermes SSH key
-from the container and the broker records the refusal. Abort between phases is
+owner re-runs it with `M0_CUTOVER_CONFIRMED=yes`, performs SELECTIVE revocation via
+`scripts/m0-broker-revoke-keys.sh` (rev-5; ChatGPT re-pin-3 finding 4): credentials are
+removed BY FINGERPRINT from an owner-supplied revocation list — never blanket file
+emptying, which could strand owner/admin access — and the script REFUSES to run unless
+the owner declares a recovery path (`M0_RECOVERY=keep:<fpr>`, a retained owner key
+verified present after revocation, or `recovery:<fpr>` removed-but-announced). It then
+RE-PROBES EVERY inventoried fingerprint individually and writes
+`cutover-verification.txt`: every revoked key must read ABSENT, the recovery key's state
+must be as declared; any wrong-state entry exits non-zero and is an automatic cutover
+failure. Revocation is then PROVEN, not assumed: §3.6 re-attempts every inventoried
+Hermes credential from the container and the broker records each result. Abort between
+phases is
 recoverable and non-destructive (Hermes keeps working, broker idle). The script's
 terminal output is committed as a Wave-0 evidence row — owner-run acts are owner
 records — and the council verifies the POST-cutover state from the broker side per
@@ -125,14 +134,30 @@ file — the exact commands with full argv — listed in the interview and owner
 in the §6a read-back. The plan is CRYPTOGRAPHICALLY authorized, not merely hashed: before
 the broker may execute anything, `workflows/m0-plans/open.json` must carry an OpenSSH
 detached signature (`open.json.sig`) that verifies via `ssh-keygen -Y verify` against an
-owner-pinned `allowed_signers` file (namespace `file`, owner principal declared in the
-plan itself; a plan that declares no owner keys authorizes nothing). A matching digest
+owner-pinned `allowed_signers` file (namespace `file`; the owner principal is pinned in
+the broker's own config — `allowed_signers` + `owner_principal` — which lives on the
+broker account and is not writable by the host; a plan signed by any key not in that
+file authorizes nothing — rev-5 wording fix per ChatGPT re-pin-3 §2 repair 1). A matching digest
 proves consistency; only the signature proves authorization — rev-4's central repair
 (ChatGPT re-pin-2, property 3). The broker recomputes every request digest from the argv
 it itself would execute and matches it against the signed plan; a caller-supplied digest
 is recorded but never trusted. An unverifiable, unsigned, or internally inconsistent plan
 means NOTHING executes, and every queued request gets a broker-committed refusal record
-citing the reason. A refusal record is a detected bypass attempt — visible to the
+citing the reason. EVERY queue line receives a disposition (rev-5; ChatGPT re-pin-3
+finding 5): valid+authorized ⇒ execute; valid+unauthorized ⇒ refusal record; malformed
+JSON or non-object line ⇒ `invalid-<hash>` refusal record; missing or invalid request id
+⇒ `noid-<hash>` / `invalid-<hash>` refusal record. No input disappears silently; silent
+skip is itself the bypass this section forbids. Execution is a DURABLE LIFECYCLE
+(rev-5's central repair, ChatGPT re-pin-3 principal finding): before any subprocess the
+broker writes a `started` state to its private durable ledger (outside the evidence
+repo, outside Hermes); after the subprocess it writes `executed` with the full record;
+after a CONFIRMED push it writes `published`. On restart the broker answers three
+questions per request from durable state alone — authorized? outcome certain? evidence
+published? — and an interrupted request whose state is stuck `started` is answered
+**UNPROVEN**: a refusal record with `unproven: true`, NEVER automatic re-execution;
+re-running an uncertain operation requires a separate explicit owner recovery decision.
+Executed-but-unpublished evidence is replayed by content re-publish (never re-execution),
+so at-least-once execution is structurally impossible. A refusal record is a detected bypass attempt — visible to the
 council, never silently dropped. The initial Wave-0 plan is drafted, digest-established,
 owner-confirmed, and broker-authenticated in exactly that order (ChatGPT re-pin-2 §6);
 an absent plan is a refusal state, never an exception to plan-gating.
@@ -142,10 +167,15 @@ every operation — request, exact argv, start/end timestamps, exit code, comple
 stdout/stderr including failures, digests of produced artifacts, and the authenticated
 plan digest the request matched — directly to the evidence repo under its own key, as
 commits Hermes neither authors nor relays. Hermes may cite URLs; it cannot author, edit,
-or reorder those bytes. Publication is not silent: every git step (fetch, reset, write,
-commit, push) is exit-checked, each record's `published` flag is set only from a
-CONFIRMED push, and repeated push failure exits the runner non-zero so systemd restarts
-it with backoff and a stalled evidence pipeline becomes loud rather than quiet (§3.5).
+or reorder those bytes. Publication is not silent: every git step (fetch, write, commit,
+push) is exit-checked, each request's durable state reaches `published` only from a
+CONFIRMED push, evidence left unpushed is re-published on the next cycle WITHOUT
+re-executing the command (the durable ledger proves the outcome), and repeated push
+failure exits the runner non-zero so systemd restarts it with backoff and a stalled
+evidence pipeline becomes loud rather than quiet (§3.5). The runner's `--once` mode
+performs exactly one fetch/process/publish cycle and exits — the mode the test harness
+and any manual verification use; `--daemon` is the systemd loop (rev-5: `--once` is
+implemented, not merely claimed — proven by regression test P0-10).
 
 **3.5 — No-unlogged-path rule + per-wave manifest.** Any M0-relevant operation class
 that cannot be routed through or observed by the broker is excluded from the wave and
@@ -161,11 +191,17 @@ the evidence-branch HEAD at close — committed to the PUBLIC toolstack repo
 (`workflows/m0-retention/`). Public-record permanence therefore rests on small digests
 plus pack hashes that survive any private-repo deletion, while bulk stdout/stderr stays
 private without pretending months-to-years of private history is a public anchor
-(ChatGPT re-pin-2, repair 6).
+(ChatGPT re-pin-2, repair 6). The PUBLIC retention repository carries the SAME protection
+contract as the private one (rev-5; ChatGPT re-pin-3 repair 5): force-push and branch
+deletion disabled, each wave's pack commit pinned by digest in that wave's evidence pack,
+and the council independently retrieves the pack and verifies pack digest +
+evidence-branch HEAD at every wave close — a Wave-0 configuration and verification
+requirement, with a test pack published and council-fetched during Wave 0 itself. Absence
+of Rekor is never classified as a failure when this mechanism verifies (ChatGPT re-pin-3 §6).
 
 **3.6 — Cutover bypass-detection test (Wave-0 gate; ChatGPT's required test).**
 Immediately after cutover, before any later wave consumes a command whose truth depends
-on capture completeness, all five of the following are executed and committed:
+on capture completeness, all six of the following are executed and committed:
 (a) the Hermes identity attempts host SSH — must be refused, host-side log line
 captured; (b) the Hermes identity probes the docker socket — must be permission-denied;
 (c) an out-of-plan request to the broker — must produce a refusal record; (d) a
@@ -173,10 +209,15 @@ broker-authored evidence commit — the council fetches the evidence repo raw UR
 verifies the commit author and payload directly; (e) the broker's signed-plan gate — the
 council fetches `workflows/m0-plans/open.json` + `open.json.sig` raw, runs
 `ssh-keygen -Y verify` itself against the owner's pinned key, and confirms a tampered
-variant is refused (the test suite's P0-2 is the reproducible sim of this). Together,
+variant is refused (the test suite's P0-2 is the reproducible sim of this); (f) the
+durability contract — the council verifies from the broker's unit file and the test
+suite (P0-6/7/8) that restart cannot re-execute a decided request and an uncertain
+execution surfaces as UNPROVEN. Together,
 (a) + the setup script's pre-cutover fingerprint inventory VERIFY revocation — every
-credential the inventory listed is re-probed for refusal — rather than assuming the
-removal step succeeded. Until all five are verified, capture
+credential the inventory listed is re-probed for refusal, each result recorded
+separately in `cutover-verification.txt` (rev-5; per-fingerprint, not one representative
+key) — rather than assuming the
+removal step succeeded. Until all six are verified, capture
 completeness is UNPROVEN and no evidence row binds. A failure here is never repaired by
 weakening the test: it returns the project to pre-cutover state and a protocol rev.
 
@@ -257,7 +298,7 @@ evidence is never collapsed into one end-loaded review (both members, Q4).
 
 | Wave | Hermes executes | Owner says (total sentences) |
 |---|---|---|
-| 0 | (after protocol ACCEPT) broker setup + §3.6 cutover test (owner runs §3.1 script); C1/C2 host prep via broker; readiness re-check | 1 setup-script run (§3.1) + rulings for execution-blocking open decisions (D-06/07/11/17/18, OQ-9 as needed) — shape (c). Wave-0 pack gets its own council validation (§2a). |
+| 0 | (after protocol ACCEPT) broker setup + §3.6 cutover test (owner runs the full §3.1 sequence: phase-1 script, GitHub deploy key, phase-2 inventory, revocation fingerprint list + confirm run); C1/C2 host prep via broker; readiness re-check | the full §3.1 cutover sequence (§8 rows 1–4, not "one script run" — see §8 for the itemized count) + rulings for execution-blocking open decisions (D-06/07/11/17/18, OQ-9 as needed) — shape (c). Wave-0 pack gets its own council validation (§2a). |
 | 1 | C3/C4/C5 prep: archive + copy + drill (writes only, zero destructive) | 3 approvals (shape a) + 1 risk acceptance (F-1, shape b) + read-back (§6a) |
 | 2 | Build chain: compose up, pin digests, sidecar smoke, archive fetch (§8), **then the cold-session row (§4)** | 1 fetch + 1 paste + 1 challenge answer (§4) + read-back |
 | 3 | Verification chain: T-13, T-16, T-15, T-19, T-05, solve attempt, R-4/R-5/R-7 live walk with T-11 evidence (first live execution closes the three exceptions) | 0 unless a live re-confirm (§5) or an irreversible fork appears; + read-back |
@@ -276,8 +317,10 @@ proves tamper-evidence of committed entries, not speaker identity; the read-back
 are what authenticate the record with the owner.
 
 **Total expected owner labor: ~20 sentences + 1 fetch + 1 paste + 1 challenge answer +
-1 setup-script run (§3.1) + 5 read-back confirmations. No typing of commands, no
-assembly, no transcription work.**
+the full §3.1 cutover sequence (per §8: phase-1 script run, GitHub deploy-key
+registration, phase-2 inventory run, revocation fingerprint list + confirm run, ≈4–5
+short interactions with verification checks) + 5 read-back confirmations. No typing of
+commands, no assembly, no transcription work.**
 
 ## 7. Transcript
 
@@ -289,12 +332,14 @@ council pack, reconciled per §3.7 against the broker's record.
 ## 8. The human keyboard moments (complete list)
 
 1. Wave 0: the broker cutover (§3.1), with own hands — the act that ends Hermes's host
-   execution authority. Honestly counted, this is: read the setup script once; run phase
-   1 (provision + service start); register the broker deploy key on GitHub (web); run
-   phase 2 `--confirm-cutover` once to read the fingerprint inventory, then again with
-   `M0_CUTOVER_CONFIRMED=yes` to execute removal. That is 2 script invocations + 1 web
-   interaction + 1 confirmation re-run — one reading, ~4 short interactions total, not
-   the "one run" rev-3 understated (ChatGPT re-pin-2, repair 4).
+   execution authority. Honestly counted, this is: read the setup + revoke scripts once;
+   run phase 1 (provision + service start); register the broker deploy key on GitHub
+   (web); run phase 2 `--confirm-cutover` once to read the fingerprint inventory, supply
+   the revocation fingerprint list + declared recovery key, then re-run with
+   `M0_CUTOVER_CONFIRMED=yes` to execute selective revocation and read
+   `cutover-verification.txt`. That is 3 script invocations + 1 web interaction + 1
+   fingerprint-list supply — one reading, ~4–5 short interactions total, not the "one
+   run" rev-3 understated (ChatGPT re-pin-2 repair 4; re-pin-3 repair 3 §6 consistency).
 2. Wave 2: fetch the archive once (`curl` the pinned-branch archive to `~/he-build/`
    — no git clone; build box has no repo access) + open the fresh session + paste the
    prepared trigger + answer the follow-up challenge (§4).

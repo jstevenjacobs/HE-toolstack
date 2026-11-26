@@ -8,10 +8,13 @@
 # Rev-4 repairs (ChatGPT re-pin-2 §3B/§5 P0):
 #  - Docker group membership asserted (id -nG check) for a pre-existing account.
 #  - The script starts + enables the service itself; cutover requires it active.
-#  - Full Hermes credential inventory: EVERY authorized_keys entry is listed by
-#    fingerprint with its source; ALL are removed at cutover (not name-matched
-#    subsets). Remaining-credential check must show zero entries.
 #  - Counted invocations stated honestly (see usage).
+# Rev-5 repairs (ChatGPT re-pin-3 §2 repair 4):
+#  - Revocation is SELECTIVE by explicit fingerprint list (M0_REVOKE_FPR), never a
+#    blanket authorized_keys wipe; owner declares recovery (M0_RECOVERY) or the
+#    script refuses. Timestamped backups of every modified file.
+#  - Per-credential verification records written to cutover-verification.txt;
+#    any unverified credential aborts the cutover (exit 1).
 set -euo pipefail
 REPO="${1:?usage: sudo ./m0-broker-setup.sh <repo-checkout-path> [--confirm-cutover]}"
 PHASE="${2:-provision}"
@@ -39,20 +42,28 @@ if [[ $PHASE == --confirm-cutover ]]; then
     ssh-keygen -lf "$hk" 2>/dev/null | sed "s#^#$hk  #" \
       >> /opt/m0-broker/cutover/hermes-credentials.txt || true
   done
-  echo "=== ALL host SSH credentials about to be REMOVED (review, then re-run to confirm) ==="
+  echo "=== ALL host SSH credentials (review, then re-run to confirm) ==="
   cat /opt/m0-broker/cutover/hermes-credentials.txt
   if [[ ${M0_CUTOVER_CONFIRMED:-} != yes ]]; then
     echo "Re-run as: sudo M0_CUTOVER_CONFIRMED=yes $0 $REPO --confirm-cutover"
     echo "(nothing revoked yet)"
     exit 2
   fi
-  # Remove ALL listed credentials — the owner is the sole key-holder post-cutover.
-  for hk in /home/*/.ssh/authorized_keys /root/.ssh/authorized_keys; do
-    [[ -f $hk ]] && : > "$hk"
-  done
-  # Revocation PROVEN, not assumed: container-side key must now be refused.
+  # rev-5: SELECTIVE revocation by explicit fingerprint list (ChatGPT re-pin-3 4A:
+  # rev-4's blanket ':>' could destroy owner/admin recovery access). The owner must
+  # enumerate exactly which fingerprints are Hermes's, and declare how owner access
+  # survives: M0_RECOVERY=local-console or M0_RECOVERY=keep:<SHA256:fingerprint>.
+  [[ -n ${M0_REVOKE_FPR:-} ]] || { echo "ABORT: set M0_REVOKE_FPR='SHA256:.. SHA256:..' (space-separated Hermes fingerprints from the inventory above)"; exit 1; }
+  [[ -n ${M0_RECOVERY:-} ]] || { echo "ABORT: set M0_RECOVERY=local-console  (or keep:<SHA256:fpr> to retain one owner recovery key)"; exit 1; }
+  install -m 0755 "$REPO/scripts/m0-broker-revoke-keys.sh" /opt/m0-broker/revoke-keys.sh
+  M0_REVOKE_FPR="$M0_REVOKE_FPR" M0_RECOVERY="$M0_RECOVERY" CUTOVER_DIR=/opt/m0-broker/cutover \
+    /opt/m0-broker/revoke-keys.sh --revoke \
+      /home/*/.ssh/authorized_keys /root/.ssh/authorized_keys \
+    || { echo "ABORT: per-credential revocation verification FAILED — fix, do not proceed"; exit 1; }
+  # Revocation PROVEN per credential (host side). Container-side re-probe:
   echo "Cutover done. BEFORE declaring Wave-0 ready, PROVE it from the container:"
-  echo "  ssh -i <hermes-key> -p 2222 steven@host.docker.internal  =>  MUST be refused"
+  echo "  for EACH inventoried Hermes fingerprint: ssh -k <that key> -p 2222 steven@host.docker.internal  =>  MUST be refused"
+  echo "  record each result separately in the wave pack; any unverified credential = cutover failure."
   echo "and run §3.6 tests (a)-(d). Until proven, revocation is UNPROVEN."
   exit 0
 fi
@@ -100,4 +111,5 @@ echo "  3. verify service: systemctl status m0-broker && sudo -u $BROKER /opt/m0
 echo "  4. run phase 2: sudo $0 $REPO --confirm-cutover"
 echo "     (lists all credentials; re-run with M0_CUTOVER_CONFIRMED=yes to execute)"
 echo "  5. prove revocation from the container + run §3.6 tests (a)-(d)"
-echo "Total: 2 script invocations + the manual acts listed in the protocol §8."
+echo "Total: 3 script invocations (phase 1; phase 2 inventory; phase 2 confirm) + the"
+echo "manual acts listed in the protocol §8."
