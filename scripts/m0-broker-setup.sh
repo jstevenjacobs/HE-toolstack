@@ -56,15 +56,28 @@ if [[ $PHASE == --confirm-cutover ]]; then
   [[ -n ${M0_REVOKE_FPR:-} ]] || { echo "ABORT: set M0_REVOKE_FPR='SHA256:.. SHA256:..' (space-separated Hermes fingerprints from the inventory above)"; exit 1; }
   [[ -n ${M0_RECOVERY:-} ]] || { echo "ABORT: set M0_RECOVERY=local-console  (or keep:<SHA256:fpr> to retain one owner recovery key)"; exit 1; }
   install -m 0755 "$REPO/scripts/m0-broker-revoke-keys.sh" /opt/m0-broker/revoke-keys.sh
-  M0_REVOKE_FPR="$M0_REVOKE_FPR" M0_RECOVERY="$M0_RECOVERY" CUTOVER_DIR=/opt/m0-broker/cutover \
+  # rev-6 (ChatGPT re-pin-4 repair 4): the pre-cutover inventory is an INPUT to
+  # verification — every inventoried credential gets an expected state, any
+  # unexpected state exits non-zero. An inventory-less verification is a FAIL.
+  M0_REVOKE_FPR="$M0_REVOKE_FPR" M0_RECOVERY="$M0_RECOVERY" \
+  M0_INVENTORY=/opt/m0-broker/cutover/hermes-credentials.txt \
+  CUTOVER_DIR=/opt/m0-broker/cutover \
     /opt/m0-broker/revoke-keys.sh --revoke \
       /home/*/.ssh/authorized_keys /root/.ssh/authorized_keys \
-    || { echo "ABORT: per-credential revocation verification FAILED — fix, do not proceed"; exit 1; }
-  # Revocation PROVEN per credential (host side). Container-side re-probe:
-  echo "Cutover done. BEFORE declaring Wave-0 ready, PROVE it from the container:"
-  echo "  for EACH inventoried Hermes fingerprint: ssh -k <that key> -p 2222 steven@host.docker.internal  =>  MUST be refused"
-  echo "  record each result separately in the wave pack; any unverified credential = cutover failure."
-  echo "and run §3.6 tests (a)-(d). Until proven, revocation is UNPROVEN."
+    || { echo "ABORT: inventory-wide revocation verification FAILED — fix, do not proceed"; exit 1; }
+  # Container-side probes: generate an exhaustive per-credential checklist so the
+  # owner never infers completeness from a subset (rev-6, ChatGPT re-pin-4 repair 4).
+  : > /opt/m0-broker/cutover/container-probes.txt
+  for f in $M0_REVOKE_FPR; do
+    echo "$f EXPECTED=REFUSED PROBE=ssh -k <key-with-$f> -p 2222 steven@host.docker.internal RESULT=PENDING" \
+      >> /opt/m0-broker/cutover/container-probes.txt
+  done
+  echo "Cutover done (host side verified inventory-wide). BEFORE declaring Wave-0 ready:"
+  echo "  1. run EVERY probe in /opt/m0-broker/cutover/container-probes.txt from the"
+  echo "     container; each revoked fingerprint MUST be refused; set RESULT=REFUSED"
+  echo "     per line and attach the file to the wave pack. Any PENDING line ="
+  echo "     cutover failure (container-side copies are NOT covered by the host check)."
+  echo "  2. run §3.6 tests (a)-(d). Until both are proven, revocation is UNPROVEN."
   exit 0
 fi
 

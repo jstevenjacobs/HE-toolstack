@@ -1,4 +1,4 @@
-# M0 Interview Protocol (Round-07) — rev-5
+# M0 Interview Protocol (Round-07) — rev-6
 
 **Purpose.** Progress through the M0 gate with the human operator contributing only judgment (plus the bounded owner-run cutover sequence, §3.1), never mechanical labor. Every mechanical act — typing commands, running drills, hashing outputs, drafting evidence — runs through the plan-gated broker (§3) or is verified by the council. This protocol is a PROCESS design: it changes no ticket, no gate, no §9 row, no D-number, grants no authorization, and changes no council standard (evidence rules, 2/2 verdicts, three-state discipline, §9 exceptions, DESIGN-REVIEW §10 HARD STOP all unchanged). It defines who does what during M0 execution and what counts as evidence. The operator's total contribution across all of M0 is: ~20 sentences of authority (one per approval/ruling/signature, verbatim), one cold-session paste plus one challenge response, one archive fetch, and the bounded owner-run cutover sequence with the owner's own hands (§3.1, counted honestly in §8). Nothing else typed into a shell, nothing manually assembled.
 
@@ -6,6 +6,7 @@
 **rev-3.** Council round-2 at pin `2951d35`: Grok ACCEPT (amendments 1–4 verified adopted; §3 residual accepted as bounded to the single-operator threat model) + ChatGPT ACCEPT-WITH-CHANGES (Q3: §3 must specify an execution broker + independently controlled capture so Hermes cannot control the evidence boundary, plus a bypass-detection test). Rev-3 implements that design on existing infrastructure: a dedicated m0broker account, plan-gated execution, evidence-repo write separation, §3.6 cutover test — and keeps Grok's limitation statement as §3.8. Nothing else in the protocol changes. Rev-3 goes to council re-verification; both members must ACCEPT the same pin.
 **rev-4.** Council re-pin-2 at pin `cf4a804`: Grok **ACCEPT** (§3.8 limitation preserved; §8 labor honesty accepted; Q4 sequencing confirmed) + ChatGPT **REJECT** — architecture accepted, implementation rejected: plan authorization was a recomputed digest rather than a verified owner signature, runner failure paths unchecked, evidence could fail to publish silently, setup labor understated, credential revocation unproven. Rev-4 is that narrow implementation repair, per ChatGPT's own instruction ("no architectural redesign… no second machine, TPM, or remote-attestation infrastructure"). All seven required repairs are implemented and exercised by `scripts/qa/test_broker_p0.py` (8/8 green, real `ssh-keygen -Y` signatures + real git remotes, no mocks). Source replies archived in `workflows/adviser-input/round-07/`. Rev-4 goes to re-pin-3; both members must ACCEPT the same pin.
 **rev-5.** Council re-pin-3 at pin `1ce2b3c`: Grok **ACCEPT — stands at this pin** (§3.8 substance unchanged; every rev-4 delta assessed as implementation repair inside the accepted architecture; no change required) + ChatGPT **REJECT — narrower** (architecture, §3.8, plan authorization, capture fields all ACCEPTED items; five implementation P0s block: in-memory processed-set ⇒ replay after restart; no uncertain-execution recovery; blanket authorized_keys emptying could strand owner access; per-fingerprint re-probe promised not implemented; malformed queue lines vanish silently; plus P1s: §6 labor-count inconsistency, `--once` claimed but absent — a false claim in the re-pin-3 prompt, recorded honestly — public retention repo unprotected). Rev-5 is the targeted reliability repair ChatGPT recommended: durable execution-state lifecycle (`started`/`executed`/`published`, UNPROVEN on uncertain outcomes, never automatic re-execution), disposition-for-every-line, selective by-fingerprint revocation with declared owner recovery + per-credential verification record, real `--once`, public-repo protection contract, §6 count fixed. Test suite expanded to 11 scenarios / 18 assertions, all green. Source replies archived in `workflows/adviser-input/round-07/`. Rev-5 goes to re-pin-4; both members must ACCEPT the same pin.
+**rev-6.** Council re-pin-4 at pin `85090961562649a16885c382b5be5e9520810d97`: ChatGPT **REJECT — rev-5** (four P0 implementation repairs demanded beyond what rev-5's text delivered: fsync durability of the durable ledger, artifact pinning verified BEFORE spawn, request-ID collision handling, inventory-wide expected-state verification with strict recovery-declaration grammar) + Claude (advisor seat, runner scope) **ACCEPT-WITH-CHANGES** (four conditions: artifact digests in the signed plan verified pre-spawn; `max_runs` use-budget keyed to plan+argv digest; plan ABSENT ⇒ PENDING not refusal; spawn OSError ⇒ definite record not UNPROVEN) + Grok **ACCEPT — stands** (§3.8 byte-identical; no change required). Rev-6 is the targeted implementation repair of those inputs, no architecture change: `durable_write` fsyncs file AND parent directory; plan commands carry pinned `artifacts` + `max_runs` and the runner verifies digests and enforces the use-budget BEFORE spawning; reused request ids with different line content produce an explicit `ID-COLLISION` refusal preserving both request-line hashes; plan-absent requests stay PENDING (absence never blacklists an id); spawn-OSError writes a definite never-executed record; revocation verification becomes inventory-wide with `EXPECTED=… OBSERVED=… OK|FAIL` consolidated into `cutover-verification.txt`, strict `local-console | keep:<SHA256:fpr>` recovery grammar (the old `recovery:<fpr>` form is REMOVED and refused — §3.1), and an inventory-less run FAILS by design. The re-pin-4 prompt's false claims are recorded honestly: P0-12…P0-17 were named in the docstring but had NO bodies at that pin, and P0-11 asserted rev-5 output strings — fixed here. Test suite now 17 scenarios / 31 assertions, all green against real `ssh-keygen -Y` signatures and real git remotes (no network mocks). Source replies archived in `workflows/adviser-input/round-07/`. Rev-6 goes to re-pin-5; both voting members must ACCEPT the same pin.
 
 **Precedent.** This is the round-05 interview pattern (engineering walk: one line per
 row, transcript pinned, council cross-examined) extended from paper rows to live M0
@@ -107,12 +108,19 @@ owner re-runs it with `M0_CUTOVER_CONFIRMED=yes`, performs SELECTIVE revocation 
 `scripts/m0-broker-revoke-keys.sh` (rev-5; ChatGPT re-pin-3 finding 4): credentials are
 removed BY FINGERPRINT from an owner-supplied revocation list — never blanket file
 emptying, which could strand owner/admin access — and the script REFUSES to run unless
-the owner declares a recovery path (`M0_RECOVERY=keep:<fpr>`, a retained owner key
-verified present after revocation, or `recovery:<fpr>` removed-but-announced). It then
-RE-PROBES EVERY inventoried fingerprint individually and writes
-`cutover-verification.txt`: every revoked key must read ABSENT, the recovery key's state
-must be as declared; any wrong-state entry exits non-zero and is an automatic cutover
-failure. Revocation is then PROVEN, not assumed: §3.6 re-attempts every inventoried
+the owner declares a recovery path in one of exactly TWO strict forms
+(rev-6; ChatGPT re-pin-4 repair 2 + Claude-adjacent grammar tightening):
+`M0_RECOVERY=local-console` (the owner attests physical/console access, no SSH recovery
+key claimed) or `M0_RECOVERY=keep:<SHA256:fpr>` (one owner key retained and verified
+PRESENT after revocation). Any other form — including rev-5's `recovery:<fpr>`
+removed-but-announced variant — is REFUSED outright and never falls through to an
+implicit local-console assertion. Verification is then INVENTORY-WIDE, not list-wide:
+the pre-cutover inventory (`hermes-credentials.txt`, the same `ssh-keygen -lf` ledger
+phase 2 printed) is an INPUT — every inventoried credential gets an expected state
+(revoked ⇒ ABSENT, retained ⇒ PRESENT), each re-probed live, every result consolidated
+as `EXPECTED=… OBSERVED=… OK|FAIL` lines into one `cutover-verification.txt`; any wrong
+state exits non-zero and is an automatic cutover failure, and a run with `M0_INVENTORY`
+unset is itself a FAILED verification (incomplete = failed, rev-6). Revocation is then PROVEN, not assumed: §3.6 re-attempts every inventoried
 Hermes credential from the container and the broker records each result. Abort between
 phases is
 recoverable and non-destructive (Hermes keeps working, broker idle). The script's
@@ -147,7 +155,10 @@ citing the reason. EVERY queue line receives a disposition (rev-5; ChatGPT re-pi
 finding 5): valid+authorized ⇒ execute; valid+unauthorized ⇒ refusal record; malformed
 JSON or non-object line ⇒ `invalid-<hash>` refusal record; missing or invalid request id
 ⇒ `noid-<hash>` / `invalid-<hash>` refusal record. No input disappears silently; silent
-skip is itself the bypass this section forbids. Execution is a DURABLE LIFECYCLE
+skip is itself the bypass this section forbids. Dispositions are written as RECORDS —
+the broker never rewrites or removes queue entries; the queue file is the requester's
+append surface and its content is immutable history (rev-6, P0-16). Execution is a
+DURABLE LIFECYCLE
 (rev-5's central repair, ChatGPT re-pin-3 principal finding): before any subprocess the
 broker writes a `started` state to its private durable ledger (outside the evidence
 repo, outside Hermes); after the subprocess it writes `executed` with the full record;
@@ -157,10 +168,29 @@ published? — and an interrupted request whose state is stuck `started` is answ
 **UNPROVEN**: a refusal record with `unproven: true`, NEVER automatic re-execution;
 re-running an uncertain operation requires a separate explicit owner recovery decision.
 Executed-but-unpublished evidence is replayed by content re-publish (never re-execution),
-so at-least-once execution is structurally impossible. A refusal record is a detected bypass attempt — visible to the
+so at-least-once execution is structurally impossible. Every ledger write is
+durability-hardened (rev-6, ChatGPT repair 1): `durable_write` writes a temp file,
+`fsync`s it, renames it into place, and `fsync`s the parent DIRECTORY — so neither the
+record nor the rename itself can vanish on power loss. Request identity is collision-
+checked (rev-6, ChatGPT repair 3): a request id reused with DIFFERENT line content
+produces an explicit `ID-COLLISION` refusal that preserves BOTH the original and the
+conflicting `request_line_sha256`; the colliding argv never executes and the original
+disposition stands. Before ANY spawn the runner enforces the plan's pinned artifacts and
+use-budgets (rev-6, Claude conditions 1+2): every plan command carries `artifacts`
+(path + SHA-256) and `max_runs`; digests are verified pre-spawn — a post-signature swap
+yields an `ARTIFACT-MISMATCH` refusal citing observed vs pinned digests with nothing
+executed — and `max_runs` is a USE budget keyed to the canonical plan+argv digest, so a
+FRESH request id cannot reset it (`BUDGET-EXHAUSTED`). A plan-file-ABSENT is
+authorization UNVERIFIABLE, not verified-absent (rev-6, Claude condition 3): queued
+requests stay PENDING with no disposition written, so a later owner signature
+authorizes the same id — absence can never permanently blacklist. A spawn that fails
+with OSError is a DEFINITE never-executed outcome (rev-6, Claude condition 4): a
+complete failure record with `spawn_succeeded: false` is written immediately, never a
+`started` state awaiting UNPROVEN on restart. A refusal record is a detected bypass attempt — visible to the
 council, never silently dropped. The initial Wave-0 plan is drafted, digest-established,
 owner-confirmed, and broker-authenticated in exactly that order (ChatGPT re-pin-2 §6);
-an absent plan is a refusal state, never an exception to plan-gating.
+an absent plan is a PENDING state (rev-6, Claude condition 3), never an execution
+exception to plan-gating and never a permanent refusal.
 
 **3.4 — Capture outside the execution boundary.** The broker pushes the full record of
 every operation — request, exact argv, start/end timestamps, exit code, complete
@@ -211,12 +241,13 @@ council fetches `workflows/m0-plans/open.json` + `open.json.sig` raw, runs
 `ssh-keygen -Y verify` itself against the owner's pinned key, and confirms a tampered
 variant is refused (the test suite's P0-2 is the reproducible sim of this); (f) the
 durability contract — the council verifies from the broker's unit file and the test
-suite (P0-6/7/8) that restart cannot re-execute a decided request and an uncertain
-execution surfaces as UNPROVEN. Together,
+suite (P0-6/7/8/12) that restart cannot re-execute a decided request, an uncertain
+execution surfaces as UNPROVEN, and ledger writes fsync file AND directory. Together,
 (a) + the setup script's pre-cutover fingerprint inventory VERIFY revocation — every
-credential the inventory listed is re-probed for refusal, each result recorded
-separately in `cutover-verification.txt` (rev-5; per-fingerprint, not one representative
-key) — rather than assuming the
+credential the inventory listed gets an expected state re-probed live, results
+consolidated as EXPECTED=/OBSERVED= lines in `cutover-verification.txt` (rev-6;
+inventory-wide, and an inventory-less run FAILS by design; per-container copies get
+their own probe checklist) — rather than assuming the
 removal step succeeded. Until all six are verified, capture
 completeness is UNPROVEN and no evidence row binds. A failure here is never repaired by
 weakening the test: it returns the project to pre-cutover state and a protocol rev.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise rev-5 P0 repairs (ChatGPT re-pin-3 REJECT items) against the broker.
+"""Exercise rev-5 + rev-6 P0 repairs against the broker.
 
 Real mechanisms, no mocks: ssh-keygen -Y sign/verify for plan authorization and a
 local bare git remote (with a real rejecting pre-receive hook) for publish paths.
@@ -14,18 +14,34 @@ No network. Checks:
   P0-7 exec ok, push FAILED     -> retry publishes WITHOUT re-executing the command
   P0-8 crash mid-exec (started) -> UNPROVEN refusal, zero automatic re-execution
   P0-9 malformed / id-less lines-> invalid-request refusal records (no silent drop)
-  P0-10 --once                  -> exactly one cycle; process exits on its own
+  P0-10 --once                  -> exactly one cycle (cycle-counted), exact exit 0
   P0-11 revoke script           -> selective by fingerprint; owner key retained;
-                                  per-credential verification record correct
+                                  inventory-wide expected-state verification;
+                                  strict recovery declarations (rev-6)
+  P0-12 fsync durability        -> durable_write fsyncs file AND parent directory
+                                  (rev-6, ChatGPT repair 1)
+  P0-13 request-ID collision    -> reused id + different content = explicit refusal
+                                  preserving both hashes (rev-6, ChatGPT repair 3)
+  P0-14 pinned artifacts        -> script swapped after signing = nothing runs
+                                  (rev-6, Claude condition 1)
+  P0-15 use budget              -> executed argv under a FRESH id is refused by the
+                                  plan+argv-keyed budget (rev-6, Claude condition 2)
+  P0-16 plan absent -> pending  -> later signature authorizes; absence never
+                                  blacklists an id (rev-6, Claude condition 3)
+  P0-17 spawn OSError           -> definite failed-spawn record, never UNPROVEN
+                                  (rev-6, Claude condition 4)
 Usage: python3 scripts/qa/test_broker_p0.py
 """
 import hashlib
+import importlib.util
+import io
 import json
 import os
 import shutil
 import subprocess
 import sys
 import tempfile
+import unittest.mock as mock
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -75,10 +91,17 @@ def stage_and_push(clone, msg):
     sh("git", "push", "origin", "m0-evidence", cwd=clone)
 
 
-def write_plan(clone, argv_lists):
-    cmds = [{"argv": a, "artifacts": []} for a in argv_lists]
-    plan = {"wave": "0", "commands": cmds,
-            "plan_digest": canon(sorted(canon(c["argv"]) for c in cmds))}
+def plan_payload(cmds):
+    """rev-6 plan_digest: covers argv + pinned artifacts + max_runs per command."""
+    return canon(sorted(canon({"argv": c["argv"], "artifacts": c["artifacts"],
+                               "max_runs": c.get("max_runs", 1)}) for c in cmds))
+
+
+def write_plan(clone, argv_lists, artifacts=None, budgets=None):
+    cmds = [{"argv": a, "artifacts": (artifacts or {}).get(tuple(a), []),
+             "max_runs": (budgets or {}).get(tuple(a), 1)}
+            for a in argv_lists]
+    plan = {"wave": "0", "commands": cmds, "plan_digest": plan_payload(cmds)}
     pf = clone / "workflows/m0-plans/open.json"
     pf.parent.mkdir(parents=True, exist_ok=True)
     pf.write_text(json.dumps(plan))
@@ -102,7 +125,8 @@ def tamper_plan(tmp, extra_argv):
     auth = authority_clone(tmp)
     pf = auth / "workflows/m0-plans/open.json"
     body = json.loads(pf.read_text())
-    body["commands"].append({"argv": extra_argv, "artifacts": []})
+    body["commands"].append({"argv": extra_argv, "artifacts": [], "max_runs": 1})
+    body["plan_digest"] = plan_payload(body["commands"])
     pf.write_text(json.dumps(body))
     stage_and_push(auth, "tamper (attack sim)")
 
@@ -132,12 +156,19 @@ def enqueue(clone, reqs, raw_lines=()):
     sh("git", "push", "origin", "m0-evidence", cwd=clone)
 
 
-def run_broker(tmp, home, *flags):
-    """A FRESH runner process per call — exactly what a systemd restart gives."""
+def run_broker(tmp, home, *flags, extra_env=None):
+    """A FRESH runner process per call — exactly what a systemd restart gives.
+    Returns the CompletedProcess plus 'cycles' (EXECUTED/REFUSED/PENDING/
+    UNPROVEN/COLLISION decision lines emitted by that one process)."""
     env = dict(os.environ, HOME=str(home))
-    return subprocess.run(
+    if extra_env:
+        env.update(extra_env)
+    r = subprocess.run(
         [sys.executable, str(RUNNER), "--branch", "m0-evidence", *flags],
         capture_output=True, text=True, env=env, timeout=120)
+    r.cycles = sum(r.stdout.count(f"{tag} ") for tag in
+                   ("EXECUTED", "REFUSED", "PENDING", "UNPROVEN"))
+    return r
 
 
 def all_records(clone):
@@ -245,9 +276,9 @@ def main():
         # During the hook window, test pushes must carry the OWNER identity:
         auth = authority_clone(tmp)
         pf = auth / "workflows/m0-plans/open.json"
-        cmds2 = [{"argv": c2_argv, "artifacts": []}]
+        cmds2 = [{"argv": c2_argv, "artifacts": [], "max_runs": 1}]
         pf.write_text(json.dumps({"wave": "0", "commands": cmds2,
-                                  "plan_digest": canon([canon(c2_argv)])}))
+                                  "plan_digest": plan_payload(cmds2)}))
         for stale in (pf.parent / "open.json.sig", pf.parent / "open.sig"):
             if stale.exists():
                 stale.unlink()
@@ -307,12 +338,19 @@ def main():
         check("P0-9 malformed/id-less lines -> refusal records (no silent drop)",
               len(inval) >= 4, f"invalid refusal records: {len(inval)}")
 
-        # P0-10 --once performs exactly one cycle and exits (process exit proves it).
+        # P0-10 --once performs exactly ONE cycle (decision-line counted) and exits 0.
+        # Stage exactly one fresh in-plan request so the counted cycle count is 1.
+        argv10 = ["echo", "once-10"]
+        write_plan(clone, [argv10])
+        sign_plan_authority(tmp, key)
+        enqueue(clone, [{"id": "r10", "argv": argv10}])
         r10 = run_broker(tmp, home, "--once")
-        check("P0-10 --once exits after a single cycle",
-              r10.returncode in (0, 3) and r10.returncode != 2)
+        check("P0-10 --once = exactly one counted cycle, exit 0",
+              r10.returncode == 0 and r10.cycles == 1 and "EXECUTED r10" in r10.stdout,
+              f"rc={r10.returncode} cycles={r10.cycles}")
 
-        # P0-11 revoke script: selective revocation, owner key retained.
+        # P0-11 revoke script (rev-6): selective revocation + inventory-wide
+        # expected-state verification + STRICT recovery declarations.
         if shutil.which("ssh-keygen"):
             ak = Path(tmp) / "authorized_keys"
             kh = {}
@@ -323,33 +361,204 @@ def main():
             ak.write_text("".join(v + "\n" for v in kh.values()))
             fpr = {nm: sh("ssh-keygen", "-lf", str(Path(str(kp) + ".pub"))).stdout.split()[1]
                    for nm, kp in (("hermes1", Path(tmp) / "hostkey_hermes1"),
-                                 ("hermes2", Path(tmp) / "hostkey_hermes2"),
-                                 ("ownerkeep", Path(tmp) / "hostkey_ownerkeep"))}
+                                  ("hermes2", Path(tmp) / "hostkey_hermes2"),
+                                  ("ownerkeep", Path(tmp) / "hostkey_ownerkeep"))}
+            # inventory: every credential that ever existed on this account, in
+            # the setup.sh format: "<file>  <bits> SHA256:... <comment>"
+            inv = Path(tmp) / "inventory.txt"
+            lines = []
+            for nm in ("hermes1", "hermes2", "ownerkeep"):
+                rec = sh("ssh-keygen", "-lf", str(Path(tmp) / f"hostkey_{nm}.pub")).stdout.strip()
+                lines.append(f"{str(ak)}  {rec}\n")
+            inv.write_text("".join(lines))
+            cutover = Path(tmp) / "cutover"
             rv = subprocess.run(
                 ["bash", str(REVOKE), "--revoke", str(ak)],
                 capture_output=True, text=True,
                 env=dict(os.environ,
                          M0_REVOKE_FPR=f"{fpr['hermes1']} {fpr['hermes2']}",
                          M0_RECOVERY=f"keep:{fpr['ownerkeep']}",
-                         CUTOVER_DIR=str(Path(tmp) / "cutover")))
+                         M0_INVENTORY=str(inv),
+                         CUTOVER_DIR=str(cutover)))
             remaining = ak.read_text()
-            verif = (Path(tmp) / "cutover" / "cutover-verification.txt")
+            verif = cutover / "cutover-verification.txt"
             vt = verif.read_text() if verif.exists() else ""
             check("P0-11a revoke is SELECTIVE (Hermes keys gone, owner key kept)",
                   rv.returncode == 0
                   and kh["hermes1"] not in remaining and kh["hermes2"] not in remaining
                   and kh["ownerkeep"] in remaining, rv.stdout[-300:] + rv.stderr[-200:])
-            check("P0-11b per-credential verification record correct",
-                  vt.count("ABSENT (revoked OK)") == 2
-                  and "PRESENT (owner recovery retained OK)" in vt, vt[:400])
+            check("P0-11b consolidated EXPECTED=/OBSERVED= verification record, inventory complete",
+                  "REVOKE" in vt and "EXPECTED=ABSENT OBSERVED=ABSENT OK" in vt
+                  and "RECOVERY" in vt and "EXPECTED=PRESENT OBSERVED=PRESENT OK" in vt
+                  and vt.count("INVENTORY") == 3
+                  and "FAIL" not in vt, vt[:400])
+            # fail-closed: a declared recovery key that is NOT actually present
+            # must FAIL the verification and exit non-zero (repair 4 enforcement).
+            sh("ssh-keygen", "-q", "-t", "ed25519", "-N", "",
+               "-f", str(Path(tmp) / "hostkey_ghost"), "-C", "ghost")
+            ghost = sh("ssh-keygen", "-lf", str(Path(tmp) / "hostkey_ghost.pub")).stdout.split()[1]
+            rv_s = subprocess.run(
+                ["bash", str(REVOKE), "--revoke", str(ak)],
+                capture_output=True, text=True,
+                env=dict(os.environ, M0_REVOKE_FPR=fpr["hermes1"],
+                         M0_RECOVERY=f"keep:{ghost}",
+                         M0_INVENTORY=str(inv),
+                         CUTOVER_DIR=str(Path(tmp) / "cutover-short")))
+            vt_s = (Path(tmp) / "cutover-short" / "cutover-verification.txt")
+            vts = vt_s.read_text() if vt_s.exists() else ""
+            check("P0-11b2 declared-but-absent recovery key FAILS verification (exit non-zero)",
+                  rv_s.returncode != 0
+                  and "EXPECTED=PRESENT OBSERVED=ABSENT FAIL" in vts,
+                  f"rc={rv_s.returncode} " + vts[:300])
             rv2 = subprocess.run(
                 ["bash", str(REVOKE), "--revoke", str(ak)],
                 capture_output=True, text=True,
-                env=dict(os.environ, M0_REVOKE_FPR=fpr["hermes1"]))  # M0_RECOVERY unset
+                env=dict(os.environ, M0_REVOKE_FPR=fpr["hermes1"],
+                         M0_INVENTORY=str(inv)))  # M0_RECOVERY unset
             check("P0-11c refuses to run without declared recovery path",
                   rv2.returncode != 0 and "M0_RECOVERY" in rv2.stdout + rv2.stderr)
+            # rev-6 strict declaration grammar: old 'recovery:<fpr>' form is REMOVED
+            rv3 = subprocess.run(
+                ["bash", str(REVOKE), "--revoke", str(ak)],
+                capture_output=True, text=True,
+                env=dict(os.environ, M0_REVOKE_FPR=fpr["hermes1"],
+                         M0_RECOVERY=f"recovery:{fpr['ownerkeep']}",
+                         M0_INVENTORY=str(inv),
+                         CUTOVER_DIR=str(Path(tmp) / "cutover-r3")))
+            check("P0-11d removed recovery:<fpr> form is REFUSED (never implicit local-console)",
+                  rv3.returncode != 0 and "unrecognized M0_RECOVERY" in rv3.stdout + rv3.stderr,
+                  (rv3.stdout + rv3.stderr)[:200])
         else:
             check("P0-11 skipped (no ssh-keygen)", False)
+
+        # ---- rev-6 repairs: P0-12..P0-17 (bodies matching the docstring) ----
+
+        # P0-12 fsync durability: durable_write fsyncs the temp FILE and then the
+        # parent DIRECTORY (so the rename itself survives power loss).
+        spec = importlib.util.spec_from_file_location("m0_runner", RUNNER)
+        runner_mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(runner_mod)
+        probe = Path(tmp) / "fsync-probe" / "obj.json"
+        with mock.patch.object(runner_mod.os, "fsync") as fs:
+            runner_mod.durable_write(probe, {"hello": "world"})
+        real_ok = json.loads(probe.read_text()) == {"hello": "world"}
+        check("P0-12a durable_write fsyncs file AND parent dir (>=2 calls)",
+              fs.call_count >= 2, f"fsync calls: {fs.call_count}")
+        check("P0-12b durable_write real write is atomic + correct",
+              real_ok and not probe.with_suffix(".json.tmp").exists())
+
+        # P0-13 request-ID collision: same id, different line content.
+        argv13 = ["echo", "collide-1"]
+        write_plan(clone, [argv13])
+        sign_plan_authority(tmp, key)
+        enqueue(clone, [{"id": "r13", "argv": argv13}])
+        run_broker(tmp, home)
+        recs = all_records(clone)
+        r13 = next((x for x in recs if x.get("id") == "r13" and "exit" in x), None)
+        # second line reuses r13 with DIFFERENT argv (tamper/reuse sim)
+        enqueue(clone, [{"id": "r13", "argv": ["echo", "collide-2-different"]}])
+        run_broker(tmp, home)
+        recs = all_records(clone)
+        col = next((x for x in recs if x.get("id_collision") is True), None)
+        r13b = next((x for x in recs if x.get("id") == "r13"
+                     and x.get("argv") == ["echo", "collide-2-different"]
+                     and "exit" in x), None)
+        check("P0-13a reused id + different content -> explicit ID-COLLISION refusal",
+              r13 is not None and col is not None
+              and col.get("original_request_line_sha256")
+              and col.get("conflicting_request_line_sha256")
+              and col["original_request_line_sha256"] != col["conflicting_request_line_sha256"],
+              str(col)[:300])
+        check("P0-13b colliding argv NEVER executes; original disposition stands",
+              r13b is None and r13 is not None and r13.get("exit") == 0)
+
+        # P0-14 pinned artifacts swapped AFTER signing -> refuse before spawn.
+        c14 = Path(tmp) / "counter14.txt"
+        script14 = clone / "tools" / "job14.sh"
+        script14.parent.mkdir(exist_ok=True)
+        script14.write_text("#!/bin/sh\necho x >> " + str(c14) + "\n")
+        stage_and_push(clone, "artifact v1")
+        good_sha = hashlib.sha256(script14.read_bytes()).hexdigest()
+        argv14 = ["sh", str(Path(".") / "tools" / "job14.sh")]
+        write_plan(clone, [argv14], artifacts={tuple(argv14): [
+            {"path": "tools/job14.sh", "sha256": good_sha}]})
+        sign_plan_authority(tmp, key)
+        # attacker with evidence-repo push rights swaps the script AFTER the owner sign
+        script14.write_text("#!/bin/sh\neecho pwned >> /tmp/never\n")
+        stage_and_push(clone, "artifact swap (attack sim)")
+        enqueue(clone, [{"id": "r14", "argv": argv14}])
+        run_broker(tmp, home)
+        recs = all_records(clone)
+        a14 = next((x for x in recs if x.get("id") == "r14" and "reason" in x), None)
+        check("P0-14a post-sign artifact swap -> ARTIFACT-MISMATCH refusal, nothing ran",
+              a14 is not None and "ARTIFACT-MISMATCH" in a14.get("reason", "")
+              and not c14.exists(),
+              str(a14)[:300])
+        check("P0-14b refusal preserves observed vs pinned digests",
+              a14 is not None and "artifact_verification" in a14
+              and a14["artifact_verification"].get("tools/job14.sh", {}).get("match") is False)
+
+        # P0-15 use budget keyed by plan+argv digest: fresh id does not reset it.
+        c15 = Path(tmp) / "counter15.txt"
+        argv15 = ["sh", "-c", f"echo x >> {c15}"]
+        write_plan(clone, [argv15], budgets={tuple(argv15): 1})
+        sign_plan_authority(tmp, key)
+        enqueue(clone, [{"id": "r15", "argv": argv15}])
+        run_broker(tmp, home)
+        first_count = c15.read_text().count("x") if c15.exists() else 0
+        enqueue(clone, [{"id": "r15b", "argv": argv15}])   # FRESH id, same argv
+        run_broker(tmp, home)
+        recs = all_records(clone)
+        b15 = next((x for x in recs if x.get("id") == "r15b"), None)
+        second_count = c15.read_text().count("x") if c15.exists() else 0
+        check("P0-15 budget survives fresh request ids (plan+argv-keyed)",
+              first_count == 1 and second_count == 1
+              and b15 is not None and "BUDGET-EXHAUSTED" in b15.get("reason", ""),
+              f"counts {first_count}->{second_count} rec={str(b15)[:200]}")
+
+        # P0-16 plan ABSENT -> PENDING (never a blacklisting refusal); a later
+        # owner signature authorizes the same id.
+        argv16 = ["touch", str(Path(tmp) / "marker16")]
+        auth = authority_clone(tmp)
+        (auth / "workflows/m0-plans/open.json").unlink(missing_ok=True)
+        (auth / "workflows/m0-plans/open.json.sig").unlink(missing_ok=True)
+        stage_and_push(auth, "withdraw plan (owner action)")
+        enqueue(clone, [{"id": "r16", "argv": argv16}])
+        rp = run_broker(tmp, home)
+        pending_ok = "PENDING r16" in rp.stdout
+        mid_recs = all_records(clone)
+        check("P0-16a plan absent -> request stays PENDING, no disposition, no exec",
+              pending_ok and not (Path(tmp) / "marker16").exists()
+              and not any(x.get("id") == "r16" for x in mid_recs),
+              rp.stdout[-300:])
+        write_plan(clone, [argv16])           # same id re-entered below
+        sign_plan_authority(tmp, key)
+        enqueue(clone, [{"id": "r16", "argv": argv16}])
+        run_broker(tmp, home)
+        recs = all_records(clone)
+        r16 = next((x for x in recs if x.get("id") == "r16" and "exit" in x), None)
+        check("P0-16b later owner signature authorizes the SAME id (absence != blacklist)",
+              r16 is not None and (Path(tmp) / "marker16").exists(),
+              str(r16)[:200])
+
+        # P0-17 spawn OSError -> DEFINITE failed record, never UNPROVEN on restart.
+        argv17 = ["m0-no-such-binary-zzz"]
+        write_plan(clone, [argv17])
+        sign_plan_authority(tmp, key)
+        enqueue(clone, [{"id": "r17", "argv": argv17}])
+        run_broker(tmp, home)
+        recs = all_records(clone)
+        r17 = next((x for x in recs if x.get("id") == "r17"
+                    and x.get("spawn_succeeded") is False), None)
+        check("P0-17a spawn OSError -> definite record (spawn_succeeded=false, never ran)",
+              r17 is not None and "SPAWN-FAILED" in r17.get("error", "")
+              and r17.get("exit") is None, str(r17)[:300])
+        run_broker(tmp, home, "--once")       # restart over the same queue
+        recs = all_records(clone)
+        unp = [x for x in recs if x.get("id") == "r17" and x.get("unproven") is True]
+        r17dup = [x for x in recs if x.get("id") == "r17" and x.get("spawn_succeeded") is False]
+        check("P0-17b definite spawn failure never becomes UNPROVEN after restart",
+              not unp and len(r17dup) == 1)
 
     print("FAILS:", FAILS or "none")
     sys.exit(1 if FAILS else 0)
