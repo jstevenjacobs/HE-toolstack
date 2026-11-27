@@ -33,7 +33,7 @@ def _sec38_identical():
     """True iff §3.8 (accepted rev-5 slice) is byte-identical between 6c19da3 and PIN."""
     import hashlib, re
     def sec(src):
-        m = re.search(r"### 3\.8.*?(?=\n## |\Z)", src, re.S)
+        m = re.search(r"^\*\*3\.8 —.*?(?=\n## |\Z)", src, re.S | re.M)
         if not m:
             sys.exit("SEC38-NOT-FOUND in protocol")
         return hashlib.sha256(m.group(0).encode()).hexdigest()
