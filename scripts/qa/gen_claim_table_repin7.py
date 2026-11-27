@@ -29,6 +29,18 @@ rows = []
 def claim(c, ev):
     rows.append((c, ev))
 
+def _sec38_identical():
+    """True iff §3.8 (accepted rev-5 slice) is byte-identical between 6c19da3 and PIN."""
+    import hashlib, re
+    def sec(src):
+        m = re.search(r"### 3\.8.*?(?=\n## |\Z)", src, re.S)
+        if not m:
+            sys.exit("SEC38-NOT-FOUND in protocol")
+        return hashlib.sha256(m.group(0).encode()).hexdigest()
+    return sec(at("workflows/m0-interview-protocol.md")) == sec(
+        subprocess.run(["git", "-C", REPO, "show", "6c19da3:workflows/m0-interview-protocol.md"],
+                       capture_output=True, text=True, check=True).stdout)
+
 R, T, P = ("scripts/m0-broker-runner.py", "scripts/qa/test_broker_p0.py",
            "workflows/m0-interview-protocol.md")
 
@@ -88,8 +100,9 @@ claim("§3.3 scoped at rev-8: spawn CONSTRUCTION = definite never-executed; post
       anchor(proto, P, "PROCESS CONSTRUCTION fails", "3.3 scoping"))
 claim("§3.3 rev-8 fail-closed trio: usage CORRUPT / history CORRUPT:<file> / state unreadable-corrupt hold",
       anchor(proto, P, "BUDGET-STATE-CORRUPT` (ChatGPT re-pin-6 P1-3A", "trio usage") )
-claim("§3.8 architecture limitation byte-identical since accepted slice (diff vs 6c19da3 and 8509096)",
-      "git diff verified at commit 4ee1302 (this prompt's pin) — SEC38-IDENTICAL vs 6c19da3")
+claim("§3.8 architecture limitation byte-identical since accepted slice",
+      "live git-diff at pin: §3.8 at " + PIN + " vs 6c19da3 sha256-equal"
+      if _sec38_identical() else "SEC38-DIVERGED")
 _rev = subprocess.run(["git", "-C", REPO, "diff", "--quiet", "6c19da3", PIN, "--",
                        "scripts/m0-broker-revoke-keys.sh"], capture_output=True)
 if _rev.returncode != 0:
