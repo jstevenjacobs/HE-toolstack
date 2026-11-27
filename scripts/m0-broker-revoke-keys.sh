@@ -104,7 +104,8 @@ if [[ $MODE == --revoke ]]; then
       exit 1
       ;;
   esac
-  [[ -z $INV || -f $INV ]] || { echo "REFUSE: M0_INVENTORY set but file missing"; exit 1; }
+  [[ -n $INV ]] || { echo "REFUSE: M0_INVENTORY unset — revocation must state the FULL credential inventory or inventory-wide completeness can never be proven (rev-7, ChatGPT re-pin-5 P1; was WARN+proceed in rev-6)"; exit 1; }
+  [[ -f $INV ]] || { echo "REFUSE: M0_INVENTORY set but file missing"; exit 1; }
   mkdir -p "$CUTOVER_DIR/backup"
   STAMP=$(date -u +%Y%m%dT%H%M%SZ)
   for hk in "${FILES[@]}"; do

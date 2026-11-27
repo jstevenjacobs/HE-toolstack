@@ -1,9 +1,32 @@
 #!/usr/bin/env python3
-"""m0-broker-runner.py — M0 interview protocol §3.3/§3.4 plan-gated broker (rev-6).
+"""m0-broker-runner.py — M0 interview protocol §3.3/§3.4 plan-gated broker (rev-7).
 
 Runs as the m0broker account (systemd). Fails CLOSED everywhere: an unverifiable plan
 authorizes nothing; unchecked git failures stop the loop rather than continue on stale
 state; nothing is ever "processed" until its evidence is durably stored AND pushed.
+
+rev-7 repairs (ChatGPT re-pin-5 REJECT at 3f3b04a + Claude re-pin-5 required change):
+- ID-COLLISION BEFORE LIFECYCLE: the request-id/hash comparison now runs before
+  every lifecycle branch INCLUDING 'started' — a conflicting line can no longer
+  masquerade as the original's UNPROVEN outcome; both hashes always preserved
+  (ChatGPT blocker 1).
+- KNOWN OUTCOMES NEVER DEGRADE: on restart, a 'started' request first consults its
+  durable record — spawn_succeeded=False recovers as definite spawn failure, a
+  completion record recovers as executed; UNPROVEN only when genuinely uncertain
+  (ChatGPT blocker 2).
+- BUDGET FAILS CLOSED: corrupt/unparseable durable usage state refuses with
+  BUDGET-STATE-CORRUPT instead of silently reading as zero uses (ChatGPT blocker 3).
+- UNVERIFIABLE PLAN IS NEVER TERMINAL: absent, unsigned, signature-failed, or
+  structurally broken plan => all requests stay PENDING (Claude re-pin-5 required
+  change — closes the out-of-order plan/sig commit window and the push-attacker
+  blacklist vector).
+- Per-command use budget key (argv+artifacts+max_runs, not whole-plan digest), so a
+  re-sign that only adds commands cannot reset consumed budgets (Claude).
+- Spawn exception scope broadened OSError -> Exception (NUL byte / empty argv can no
+  longer crash the pass after 'started'); malformed argv rejected at plan
+  verification (Claude).
+- Directory-entry durability: durable_write fsyncs the full untracked ancestor
+  chain to the filesystem root (ChatGPT P1).
 
 rev-6 repairs (ChatGPT re-pin-4 REJECT at 8509096 + Claude re-pin-4 conditions):
 - REAL fsync durability: durable_write() fsyncs the temp file AND the parent
@@ -32,9 +55,10 @@ rev-5 repairs (ChatGPT re-pin-3 REJECT at 1ce2b3c — the five P0s):
   <state_dir>/state (started BEFORE exec, executed after, published after a
   confirmed push). The in-memory processed-set is gone; a systemd restart cannot
   replay an executed operation.
-- UNPROVEN semantics: a request whose state reads "started" at recovery time
-  (crash during/after exec, outcome uncertain) NEVER auto-reruns. The broker
-  writes an UNPROVEN refusal record; a second attempt requires a separate,
+- UNPROVEN semantics: a request whose state reads "started" at recovery time is
+  first reconciled against its durable record (rev-7) — definite outcomes never
+  degrade to UNPROVEN. A GENUINELY uncertain 'started' (no usable record) gets an
+  UNPROVEN refusal and NEVER auto-reruns; a second attempt requires a separate,
   explicit owner recovery decision.
 - Evidence durability: record/refusal files are authored in broker-owned
   <state_dir> FIRST and copied into the evidence worktree at publish time, so
@@ -77,10 +101,34 @@ def git_checked(repo: str, *args: str) -> str:
 def canonical_sha256(obj) -> str:
     return hashlib.sha256(json.dumps(obj, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
+def _sync_dir_chain(directory: Path) -> None:
+    """rev-7 (ChatGPT re-pin-5 P1): syncing a directory persists its CONTENTS, not
+    the directory's own ENTRY in its parent. When durable_write first creates a
+    nested layout (state/, records/, refusals/ under a fresh M0 root), each new
+    directory's entry must be synced through its parent chain up to the mount."""
+    chain = []
+    cur = directory
+    while len(chain) < 16:
+        chain.append(cur)
+        parent = cur.parent
+        if parent == cur:
+            break
+        cur = parent
+    for d in reversed(chain):  # deepest first, ancestors last
+        try:
+            fd = os.open(str(d), os.O_DIRECTORY)
+        except OSError:
+            return  # vanished mid-sync; nothing safe left to sync
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+
 def durable_write(path: Path, obj) -> None:
-    """Crash-consistent write (rev-6, ChatGPT re-pin-4 repair 1): write a temp
-    file, fsync it, atomically replace the destination, then fsync the parent
-    directory so the rename itself survives an abrupt host crash/power loss.
+    """Crash-consistent write (rev-6 ChatGPT re-pin-4 repair 1; rev-7 hardening):
+    write a temp file, fsync it, atomically replace the destination, then fsync
+    the parent directory AND its untracked ancestors so both the rename and the
+    entries of newly-created nested directories survive abrupt power loss.
     Atomic replacement alone only survives process restart."""
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
@@ -89,11 +137,7 @@ def durable_write(path: Path, obj) -> None:
         fh.flush()
         os.fsync(fh.fileno())
     os.replace(tmp, path)
-    dfd = os.open(str(path.parent), os.O_DIRECTORY)
-    try:
-        os.fsync(dfd)
-    finally:
-        os.close(dfd)
+    _sync_dir_chain(path.parent)
 
 class Ledger:
     """Durable per-request state + evidence, OUTSIDE the git worktree (a
@@ -130,35 +174,54 @@ class Ledger:
         return out
 
 def verify_plan(repo: str, allowed_signers: Path, principal: str) -> dict:
-    """Return {status, commands:{digest: {argv, artifacts}}, wave, plan_digest}.
-    status is the rev-6 §3.3 rule (Claude re-pin-4 condition 3):
-      'missing' — plan/sig/signer files absent: requests stay PENDING (no
-                  disposition; a later signature can still authorize them, so
-                  absence must never permanently refuse an id);
-      'invalid' — present but failing verification: refuse (fail closed);
-      'valid'   — owner-signed and internally consistent: authorizes."""
+    """Return {status, commands:{digest: {argv, artifacts, max_runs}}, wave,
+    plan_digest, signed_by}. The rev-7 §3.3 rule (Claude re-pin-5 required change
+    extends the rev-6 absent-plan rule):
+      'unverifiable' — plan absent, unsigned, signature-failed, or structurally
+                  broken: requests stay PENDING (no disposition; a later valid
+                  owner signature supersedes; unverifiable is NEVER terminal, so
+                  a push-capable attacker or an out-of-order plan/sig pair can no
+                  longer permanently blacklist ids);
+      'valid'   — owner-signed and internally consistent: authorizes.
+    Only a VALID plan may ever lead to execution; a VALID plan that does not
+    contain the request's digest is a genuine verified denial -> refuse."""
     plan_file, sig_file = Path(repo) / PLAN_PATH, Path(repo) / PLAN_SIG_PATH
+    status = {"status": "unverifiable", "commands": {}, "wave": None,
+              "plan_digest": None, "signed_by": None}
     if not plan_file.exists():
         # True absence (not yet published) => unverifiable, NOT verified-absent.
-        return {"status": "missing", "commands": {}, "wave": None,
-                "why": "plan file absent — requests remain pending"}
+        status["why"] = "plan file absent — requests remain pending"
+        return status
     if not (sig_file.exists() and allowed_signers.exists()):
-        # Plan present but unsigned/unverifiable IS a security event, not mere
-        # absence: refused on record (P0-1 behavior the council accepted at rev-5).
-        return {"status": "invalid", "commands": {}, "wave": None,
-                "why": "plan present but signature/signer file missing — fail closed"}
+        # rev-7 (Claude re-pin-5 REQUIRED change): plan present but unsigned is
+        # authorization UNVERIFIABLE, not a permanent denial — requests stay
+        # PENDING. Terminal refusals here let anyone with branch push rights plant
+        # an unsigned plan to blacklist arbitrary ids, and a plan-commit landing
+        # before its signature-commit would blacklist the ids in between. A later
+        # valid signature supersedes. (Security EVENT still gets logged loudly.)
+        log("PLAN-EVENT: plan present but signature/signer file missing — "
+            "requests remain pending (rev-7: unverifiable is never terminal)")
+        status["why"] = ("plan present but signature/signer file missing — "
+                         "requests remain pending until a valid owner signature "
+                         "supersedes")
+        return status
     v = subprocess.run(
         ("ssh-keygen", "-Y", "verify", "-f", str(allowed_signers), "-I", principal,
          "-n", "file", "-s", str(sig_file)),
         stdin=open(plan_file, "rb"), capture_output=True, text=True)
     if v.returncode != 0:
-        return {"status": "invalid", "commands": {}, "wave": None,
-                "why": f"plan signature FAILED owner verification: {v.stderr.strip()[:300]}"}
+        # Same rule for a signature that FAILS: pending, never terminal (§3.3 rev-7;
+        # an attacker-pushed bad plan can no longer permanently refuse queued ids).
+        log(f"PLAN-EVENT: plan signature FAILED owner verification — {v.stderr.strip()[:200]}")
+        status["why"] = ("plan signature FAILED owner verification — requests remain "
+                         "pending; a later valid owner signature supersedes")
+        return status
     try:
         plan = json.loads(plan_file.read_text())
     except json.JSONDecodeError as e:
-        return {"status": "invalid", "commands": {}, "wave": None,
-                "why": f"plan JSON invalid: {e}"}
+        # rev-7: structurally unreadable body => unverifiable (pending), same rule.
+        status["why"] = f"plan JSON invalid ({e}) — requests remain pending"
+        return status
     commands = {}
     payloads = []
     for c in plan.get("commands", []):
@@ -167,13 +230,14 @@ def verify_plan(repo: str, allowed_signers: Path, principal: str) -> dict:
         if not isinstance(artifacts, list) or any(
                 not isinstance(a, dict) or not isinstance(a.get("path"), str)
                 or not isinstance(a.get("sha256"), str) for a in artifacts):
-            return {"status": "invalid", "commands": {}, "wave": None,
-                    "why": "plan artifacts malformed (need {path, sha256})"}
+            status["why"] = "plan artifacts malformed (need {path, sha256}) — requests remain pending"
+            return status
         max_runs = c.get("max_runs", 1)  # rev-6 use budget (Claude re-pin-4 cond. 2)
         if not isinstance(max_runs, int) or isinstance(max_runs, bool) or max_runs < 1:
-            return {"status": "invalid", "commands": {}, "wave": None,
-                    "why": "plan max_runs must be a positive integer"}
-        if isinstance(argv, list) and all(isinstance(x, str) for x in argv):
+            status["why"] = "plan max_runs must be a positive integer — requests remain pending"
+            return status
+        if isinstance(argv, list) and argv and all(
+                isinstance(x, str) and "\x00" not in x for x in argv):
             commands[canonical_sha256(argv)] = {"argv": argv, "artifacts": artifacts,
                                                 "max_runs": max_runs}
             # plan_digest covers argv AND pinned artifact hashes AND the budget:
@@ -182,11 +246,17 @@ def verify_plan(repo: str, allowed_signers: Path, principal: str) -> dict:
             payloads.append(canonical_sha256({"argv": argv, "artifacts": artifacts,
                                               "max_runs": max_runs}))
         else:
-            return {"status": "invalid", "commands": {}, "wave": None,
-                    "why": "plan entry argv malformed"}
+            # rev-7 (Claude re-pin-5): an EMPTY argv or a NUL byte inside argv is a
+            # PLAN error, not a runtime spawn crash — rejected here so the broker can
+            # never write 'started' and then die on ValueError/IndexError, which
+            # would strand the request as UNPROVEN on restart.
+            status["why"] = ("plan entry argv malformed (empty, non-string, or NUL "
+                             "byte) — requests remain pending")
+            return status
     if canonical_sha256(sorted(payloads)) != plan.get("plan_digest", ""):
-        return {"status": "invalid", "commands": {}, "wave": None,
-                "why": "plan_digest does not match command set (argv/artifacts/max_runs)"}
+        status["why"] = ("plan_digest does not match command set "
+                         "(argv/artifacts/max_runs) — requests remain pending")
+        return status
     return {"status": "valid", "commands": commands, "wave": plan.get("wave"),
             "plan_digest": plan.get("plan_digest"), "signed_by": principal}
 
@@ -205,23 +275,57 @@ def digest_artifacts(base: Path, artifacts: list) -> dict:
                           "match": observed == a["sha256"]}
     return out
 
-def usage_count(L: Ledger, use_key: str) -> int:
-    """Executions recorded for one signed (argv+artifacts) authorization, keyed by
-    USE key = canonical_sha256(plan_digest + argv_digest), NOT by request id
-    (Claude re-pin-4 condition 2): a fresh request id re-running the same argv
-    still counts against the same budget."""
+def usage_count(L: Ledger, use_key: str):
+    """Executions recorded for one signed command authorization. rev-7 keying
+    (Claude re-pin-5): USE key = canonical_sha256(argv + artifacts + max_runs) —
+    NOT the whole-plan digest. A deliberate re-sign that only ADDS a new command
+    must not reset the use budget of commands that already consumed theirs.
+    rev-7 fail-closed (ChatGPT re-pin-5 blocker 3): returns int on OK, or a
+    'CORRUPT:<detail>' string when the durable usage file exists but cannot be
+    parsed/holds a non-int count — the CALLER must refuse, never treat corrupt
+    budget state as zero uses."""
     p = L.root / "usage" / f"{use_key}.json"
-    if p.exists():
-        try:
-            return int(json.loads(p.read_text()).get("count", 0))
-        except (json.JSONDecodeError, ValueError):
-            return 0
-    return 0
+    if not p.exists():
+        return 0  # genuinely never initialized
+    try:
+        body = json.loads(p.read_text())
+        n = body.get("count")
+        if not isinstance(n, int) or isinstance(n, bool) or n < 0:
+            raise ValueError(f"count not a non-negative int: {n!r}")
+        return n
+    except (json.JSONDecodeError, ValueError) as e:
+        return f"CORRUPT:{e}"
 
 def bump_usage(L: Ledger, use_key: str) -> int:
     p = L.root / "usage" / f"{use_key}.json"
-    n = usage_count(L, use_key) + 1
+    cur = usage_count(L, use_key)
+    if isinstance(cur, str):  # corrupt budget file: caller should have refused
+        raise RuntimeError(f"BUDGET-STATE-CORRUPT at bump: {cur}")
+    n = cur + 1
     durable_write(p, {"use_key": use_key, "count": n, "updated": now()})
+    return n
+
+def record_history_count(L: Ledger, argv, artifacts, max_runs) -> int:
+    """Executions of THIS command visible in durable completion records (rev-7).
+    Two purposes: (a) the use-budget counter file lives in broker state and would
+    reset if state is wiped — records are the audit history, so the budget reads
+    max(counter, history) (Claude re-pin-5: budgets must not reset on re-sign /
+    state loss); (b) records with spawn_succeeded=False (never spawned) do NOT
+    count against the budget — a failed spawn consumed no execution."""
+    d = L.root / "records"
+    if not d.exists():
+        return 0
+    n = 0
+    for f in sorted(d.glob("*.json")):
+        try:
+            rec = json.loads(f.read_text())
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(rec, dict) or rec.get("spawn_succeeded") is False:
+            continue
+        if (rec.get("argv") == argv and rec.get("max_runs") == max_runs
+                and rec.get("artifact_contract") == artifacts):
+            n += 1
     return n
 
 def load_config() -> dict:
@@ -262,9 +366,24 @@ def run_pass(a, allowed_signers: Path, L: Ledger) -> int:
         return 2
     plan = verify_plan(a.repo, allowed_signers, a.owner_principal)
     q = Path(a.repo) / QUEUE_PATH
-    lines = q.read_text().splitlines() if q.exists() else []
+    # rev-7 (Claude re-pin-5): read the queue as BYTES and decode per line, so one
+    # undecodable byte cannot raise UnicodeDecodeError and kill the whole pass.
+    # An undecodable line gets the same invalid-request disposition as malformed
+    # JSON, hashed over its raw bytes.
+    raw_lines: list[bytes] = []
+    if q.exists():
+        raw_lines = [ln for ln in q.read_bytes().split(b"\n") if ln.strip()]
 
-    for raw in lines:
+    for raw_b in raw_lines:
+        try:
+            raw = raw_b.decode("utf-8")
+        except UnicodeDecodeError as e:
+            req_hash = hashlib.sha256(raw_b).hexdigest()
+            rid = f"invalid-{req_hash[:16]}"
+            if not L.load(rid):
+                refuse(L, rid, f"invalid-request: queue line not valid UTF-8 ({e}) "
+                               f"— §3.4 fail closed", req_hash)
+            continue
         if not raw.strip():
             continue
         req_hash = hashlib.sha256(raw.encode()).hexdigest()
@@ -285,19 +404,12 @@ def run_pass(a, allowed_signers: Path, L: Ledger) -> int:
                 refuse(L, rid, "invalid-request: missing or invalid request id", req_hash)
             continue
         st = L.load(rid)
-        if st and st.get("status") in ("started",):
-            # outcome UNCERTAIN after a crash: never re-execute automatically.
-            refuse(L, rid,
-                   "UNPROVEN: execution was started before a broker restart and its outcome "
-                   "is uncertain; re-execution requires a separate explicit owner recovery "
-                   "decision (§3.3 rev-5)", req_hash,
-                   extra={"unproven": True, "started_note": st.get("note", "")})
-            continue
-        if st and st.get("status") in ("executed", "dispositioned", "published"):
-            # rev-6 (ChatGPT re-pin-4 repair 3): a queue line reusing an existing
-            # request ID must never disappear silently. Same line hash = genuine
-            # duplicate (already disposed); different hash = ID collision/tampering
-            # -> explicit refusal preserving BOTH hashes.
+        # --- rev-7 blocker 1 (ChatGPT re-pin-5): ID-COLLISION is checked BEFORE
+        # every lifecycle-state branch, including 'started'. A request id must
+        # always identify one exact request content; the collision evidence must
+        # preserve BOTH hashes and must not be preempted by started-recovery, or a
+        # conflicting line would masquerade as the original's UNPROVEN outcome.
+        if st:
             prior_hash = st.get("request_line_sha256", "")
             if prior_hash and prior_hash != req_hash:
                 collision_key = f"{rid}-collision-{req_hash[:16]}"
@@ -312,22 +424,61 @@ def run_pass(a, allowed_signers: Path, L: Ledger) -> int:
                                   "conflicting_request_line_sha256": req_hash,
                                   "original_status": st.get("status")},
                            key=collision_key)
-            continue  # already decided; publish step handles pending ones
+                continue  # original untouched (still 'started' if it was); its own
+                          # line recovers/disposes separately when it reappears
+        if st and st.get("status") == "started":
+            # --- rev-7 blocker 2 (ChatGPT re-pin-5): before declaring UNPROVEN,
+            # inspect the durable RECORD. A record written after a definite
+            # spawn-failure (spawn_succeeded False) or after completion proves the
+            # outcome even if the crash landed between record and state save — a
+            # KNOWN outcome must never degrade to uncertain on restart.
+            rec_path = L.record(rid)
+            rec = None
+            if rec_path.exists():
+                try:
+                    rec = json.loads(rec_path.read_text())
+                except json.JSONDecodeError:
+                    rec = None
+            if isinstance(rec, dict) and rec.get("spawn_succeeded") is False:
+                L.save(rid, "executed", req_hash=req_hash,
+                       note="RECOVERED: durable definite spawn-failure record proves "
+                            "the process never started; not UNPROVEN")
+                log(f"RECOVERED {rid}: definite spawn-failure record before UNPROVEN")
+                continue
+            if (isinstance(rec, dict) and rec.get("spawn_succeeded") is True
+                    and "exit" in rec):
+                L.save(rid, "executed", req_hash=req_hash,
+                       note="RECOVERED: durable completion record written before the "
+                            "crash; outcome certain, not UNPROVEN")
+                log(f"RECOVERED {rid}: completion record before UNPROVEN")
+                continue
+            # outcome genuinely UNCERTAIN after a crash: never re-execute automatically.
+            refuse(L, rid,
+                   "UNPROVEN: execution was started before a broker restart and its outcome "
+                   "is uncertain; re-execution requires a separate explicit owner recovery "
+                   "decision (§3.3 rev-5)", req_hash,
+                   extra={"unproven": True, "started_note": st.get("note", "")})
+            continue
+        if st and st.get("status") in ("executed", "dispositioned", "published"):
+            continue  # already decided and hash-consistent; publish handles pendings
         argv = req.get("argv")
         own_digest = canonical_sha256(argv) if isinstance(argv, list) else ""
+        # --- rev-7 (Claude re-pin-5 REQUIRED): an UNVERIFIABLE plan — absent,
+        # unsigned, signature-failed, or structurally broken — is never terminal.
+        # Every queued request simply stays pending; a later valid owner signature
+        # supersedes. This closes both the out-of-order plan/sig commit window and
+        # the push-capable-attacker blacklist vector.
+        if plan.get("status") != "valid":
+            log(f"PENDING {rid}: plan unverifiable — no disposition written")
+            continue
         entry = plan["commands"].get(own_digest)
         if entry is None:
-            if plan.get("status") == "missing":
-                # §3.3 rev-6 rule (Claude re-pin-4 condition 3): no plan present =
-                # authorization UNVERIFIABLE, not verified-absent. The request stays
-                # pending — a later owner signature authorizes it. Refusing here
-                # would let absence permanently blacklist ids the owner later signs.
-                log(f"PENDING {rid}: plan missing/unverifiable — no disposition written")
-                continue
-            reason = plan.get("why") or "digest not in owner-signed open plan (§3.3)"
-            refuse(L, rid, reason, req_hash, extra={
-                "runner_computed_digest": own_digest,
-                "caller_supplied_digest": req.get("command_digest")})
+            # A VALID plan that does not contain this digest is a genuine verified
+            # denial (§3.3) — refuse on record.
+            refuse(L, rid, "digest not in owner-signed open plan (§3.3)", req_hash,
+                   extra={
+                       "runner_computed_digest": own_digest,
+                       "caller_supplied_digest": req.get("command_digest")})
             continue
         # --- rev-6 pre-spawn gates (Claude re-pin-4 conditions 1+2) ---
         # 1) pinned artifact digests verified BEFORE spawn; mismatch = refuse, run nothing.
@@ -340,13 +491,30 @@ def run_pass(a, allowed_signers: Path, L: Ledger) -> int:
                    extra={"artifact_verification": art,
                           "runner_computed_digest": own_digest})
             continue
-        # 2) signed use budget, keyed by plan_digest+argv_digest (survives fresh ids).
-        use_key = canonical_sha256([plan.get("plan_digest", ""), own_digest])
+        # 2) signed use budget. rev-7 keying (Claude re-pin-5): per-COMMAND use key =
+        # argv digest + pinned artifacts + max_runs — NOT the whole-plan digest, so a
+        # re-sign that only adds commands cannot reset budgets already consumed.
+        # rev-7 also takes max(counter, durable-record history): a broker-state wipe
+        # cannot reset a budget whose executions are still on record.
+        use_key = canonical_sha256([entry["argv"], entry["artifacts"], entry["max_runs"]])
         used = usage_count(L, use_key)
+        if isinstance(used, str):
+            # rev-7 blocker 3 (ChatGPT re-pin-5): the durable budget file EXISTS but is
+            # corrupt/unparseable -> FAIL CLOSED. Never read corrupt state as zero uses;
+            # recovery requires explicit owner intervention (delete/repair the file).
+            refuse(L, rid, f"BUDGET-STATE-CORRUPT: durable usage state for this signed "
+                           f"command is unreadable ({used}) — refusing to execute; "
+                           f"corrupt authorization state must never grant runs "
+                           f"(fail closed, §3.3 rev-7)", req_hash,
+                   extra={"use_key": use_key, "budget_state": used})
+            continue
+        used = max(used, record_history_count(L, entry["argv"], entry["artifacts"],
+                                              entry["max_runs"]))
         if used >= entry["max_runs"]:
             refuse(L, rid, f"BUDGET-EXHAUSTED: this signed command has already been "
                            f"executed {used}/{entry['max_runs']} authorized time(s) "
-                           f"(budget keyed by plan+argv digest, not request id)", req_hash,
+                           f"(budget keyed per command: argv+artifacts+max_runs, not "
+                           f"request id)", req_hash,
                    extra={"runner_computed_digest": own_digest,
                           "use_key": use_key, "used": used,
                           "max_runs": entry["max_runs"]})
@@ -362,12 +530,15 @@ def run_pass(a, allowed_signers: Path, L: Ledger) -> int:
             exit_code, stdout, stderr = cp.returncode, cp.stdout, cp.stderr
         except subprocess.TimeoutExpired:
             exit_code, stdout, stderr, err = None, "", "", "TIMEOUT exceeded 3600s"
-        except OSError as e:
-            # rev-6 (Claude re-pin-4 condition 4): the spawn NEVER HAPPENED — no
-            # side effect is possible, so this is a DEFINITE failure record, not
-            # an uncertain 'started' outcome awaiting UNPROVEN on restart.
+        except Exception as e:
+            # rev-6 (Claude re-pin-4 condition 4) + rev-7 (Claude re-pin-5 residual):
+            # ANY exception from the spawn call means the process NEVER STARTED — no
+            # side effect is possible — so this is a DEFINITE failure record, not an
+            # uncertain 'started' outcome awaiting UNPROVEN on restart. Broadened from
+            # OSError so ValueError (NUL byte), IndexError (empty argv) and any future
+            # spawn-path error cannot crash the pass after 'started' was written.
             exit_code, stdout, stderr = None, "", ""
-            err = f"SPAWN-FAILED (OSError, never executed): {e}"
+            err = f"SPAWN-FAILED ({type(e).__name__}, never executed): {e}"
             durable_write(L.record(rid), {
                 "id": rid, "wave": plan["wave"], "plan_digest": plan.get("plan_digest"),
                 "signed_by": plan.get("signed_by"),
@@ -375,6 +546,7 @@ def run_pass(a, allowed_signers: Path, L: Ledger) -> int:
                 "request_line_sha256": req_hash, "request_raw": raw,
                 "argv": entry["argv"], "runner_computed_digest": own_digest,
                 "caller_supplied_digest": req.get("command_digest"),
+                "max_runs": entry["max_runs"], "artifact_contract": entry["artifacts"],
                 "exit": None, "stdout": "", "stderr": "", "error": err,
                 "spawn_succeeded": False,
                 "artifact_digests": art})
@@ -390,6 +562,7 @@ def run_pass(a, allowed_signers: Path, L: Ledger) -> int:
             "request_line_sha256": req_hash, "request_raw": raw,
             "argv": entry["argv"], "runner_computed_digest": own_digest,
             "caller_supplied_digest": req.get("command_digest"),
+            "max_runs": entry["max_runs"], "artifact_contract": entry["artifacts"],
             "exit": exit_code, "stdout": stdout, "stderr": stderr,
             "error": err, "spawn_succeeded": True,
             "artifact_digests": art})
