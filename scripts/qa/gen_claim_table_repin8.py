@@ -82,6 +82,8 @@ if (real_pass, real_fail) != (int(pp.group(1)), int(ff.group(1))):
     sys.exit(f"HEADER/LOG MISMATCH: header {pp.group(1)}/{ff.group(1)} log {real_pass}/{real_fail}")
 if not log.rstrip().endswith("FAILS: none"):
     sys.exit("LOG-TAIL not 'FAILS: none'")
+claim("digest_artifacts: directory or unreadable artifact path -> observed='UNREADABLE' (never an uncaught OSError crashing the pass; ChatGPT re-pin-7 P1 / Claude NB2)",
+      anchor(runner, R, 'observed = f"UNREADABLE ({type(e).__name__})"', "digest OSError fold"))
 claim(f"Test suite green AT THIS PIN per the COMMITTED artifact (mechanically re-counted here from the committed log, not from the header alone): {real_pass} PASS / {real_fail} FAIL / tail 'FAILS: none'; artifact header pins the code commit {mm.group(1)} (run from a clean git archive of it — no scratch-dir log, no hardcoded count in any docstring)",
       f"git show {PIN}:{HDR} re-counted against git show {PIN}:{ART}")
 claim("Test docstring cites the committed artifact path (not b134df3, not /tmp)",
