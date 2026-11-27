@@ -10,7 +10,8 @@ traps subprocess.Popen (argv-scoped) to inject ONE non-OSError at the spawn
 call; the writes themselves are real. There is no sshd involvement anywhere —
 the revoke tests operate on authorized_keys FILES directly (the docstring
 previously overclaimed "no mocks"; corrected rev-7, ChatGPT re-pin-5 P1). No
-network. Checks:
+network. Suite: 22 scenarios / 57 checks — 57 PASS / 0 FAIL at the rev-8 pin
+(4ee1302; run log `rev8_test_final.log`). Checks:
   P0-1 unsigned plan            -> nothing executes; requests stay PENDING
                                   (rev-7: unverifiable is never terminal) and a
                                   later signature runs the SAME id
