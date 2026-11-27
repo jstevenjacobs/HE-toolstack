@@ -105,7 +105,11 @@ def _sync_dir_chain(directory: Path) -> None:
     """rev-7 (ChatGPT re-pin-5 P1): syncing a directory persists its CONTENTS, not
     the directory's own ENTRY in its parent. When durable_write first creates a
     nested layout (state/, records/, refusals/ under a fresh M0 root), each new
-    directory's entry must be synced through its parent chain up to the mount."""
+    directory's entry must be synced through its parent chain. rev-8 honesty
+    (Claude re-pin-6 non-blocking): the chain is CAPPED at 16 ancestor levels —
+    fsync reaches the filesystem root for every path shallower than that cap,
+    which covers any realistic broker layout, but the claim is 'up to 16 levels',
+    not 'always to the root'. Every ancestor IS synced (not only untracked ones)."""
     chain = []
     cur = directory
     while len(chain) < 16:
@@ -127,9 +131,11 @@ def _sync_dir_chain(directory: Path) -> None:
 def durable_write(path: Path, obj) -> None:
     """Crash-consistent write (rev-6 ChatGPT re-pin-4 repair 1; rev-7 hardening):
     write a temp file, fsync it, atomically replace the destination, then fsync
-    the parent directory AND its untracked ancestors so both the rename and the
+    the parent directory AND its ancestors so both the rename and the
     entries of newly-created nested directories survive abrupt power loss.
-    Atomic replacement alone only survives process restart."""
+    Atomic replacement alone only survives process restart. The dir sync is
+    capped at 16 ancestor levels (see _sync_dir_chain docstring for the exact
+    rev-8 wording)."""
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
     with open(tmp, "w", encoding="utf-8") as fh:
@@ -152,7 +158,24 @@ class Ledger:
         return self.root / "refusals" / f"{rid}.json"
     def load(self, rid: str) -> dict | None:
         p = self.state(rid)
-        return json.loads(p.read_text()) if p.exists() else None
+        if not p.exists():
+            return None
+        try:
+            body = json.loads(p.read_text())
+        except json.JSONDecodeError as e:
+            # rev-8 (Claude re-pin-6 non-blocking 1): pending() tolerates corrupt
+            # state files; load() must not crash the whole pass on one. NEVER
+            # return None here (that means 'never seen' -> would RE-EXECUTE).
+            # A corrupt state file returns an 'unreadable-corrupt' sentinel that
+            # run_pass HOLDS (no disposition, no execution) and logs loudly.
+            log(f"LEDGER-STATE-CORRUPT {rid}: {e} — held, never re-executed")
+            return {"id": rid, "status": "unreadable-corrupt", "note": str(e)}
+        if not isinstance(body, dict):
+            log(f"LEDGER-STATE-CORRUPT {rid}: state is {type(body).__name__}, not an "
+                "object — held, never re-executed")
+            return {"id": rid, "status": "unreadable-corrupt",
+                    "note": f"state is {type(body).__name__}, not an object"}
+        return body
     def save(self, rid: str, status: str, note: str = "", req_hash: str = "") -> None:
         durable_write(self.state(rid), {
             "id": rid, "status": status, "updated": now(), "note": note,
@@ -217,11 +240,27 @@ def verify_plan(repo: str, allowed_signers: Path, principal: str) -> dict:
                          "pending; a later valid owner signature supersedes")
         return status
     try:
-        plan = json.loads(plan_file.read_text())
-    except json.JSONDecodeError as e:
+        raw_plan = json.loads(plan_file.read_text())
+    except (json.JSONDecodeError, OSError) as e:
         # rev-7: structurally unreadable body => unverifiable (pending), same rule.
-        status["why"] = f"plan JSON invalid ({e}) — requests remain pending"
+        # rev-8 (ChatGPT re-pin-6): an unreadable file (OSError) is the SAME class.
+        status["why"] = f"plan JSON invalid/unreadable ({e}) — requests remain pending"
         return status
+    # rev-8 (ChatGPT re-pin-6 P1): the decoded body must be an OBJECT with a list
+    # of command objects BEFORE any .get/.index walk. A syntactically valid JSON
+    # list/scalar used to escape the unverifiable path via an uncaught
+    # AttributeError/TypeError — a crash instead of the promised PENDING.
+    if not isinstance(raw_plan, dict):
+        status["why"] = (f"plan JSON is {type(raw_plan).__name__}, not an object — "
+                         "requests remain pending")
+        return status
+    raw_commands = raw_plan.get("commands")
+    if not isinstance(raw_commands, list) or any(
+            not isinstance(c, dict) for c in raw_commands):
+        status["why"] = ("plan commands must be a list of objects — requests remain "
+                         "pending")
+        return status
+    plan = raw_plan
     commands = {}
     payloads = []
     for c in plan.get("commands", []):
@@ -287,13 +326,19 @@ def usage_count(L: Ledger, use_key: str):
     p = L.root / "usage" / f"{use_key}.json"
     if not p.exists():
         return 0  # genuinely never initialized
+    # rev-8 (ChatGPT re-pin-6 3A): unreadable file, non-object JSON (e.g. [],
+    # "unexpected"), or a body without a valid int count are ALL corruption. The
+    # rev-7 catches (JSONDecodeError/ValueError) missed the AttributeError an
+    # object-less body raises — must land in CORRUPT, never a crash, never zero.
     try:
         body = json.loads(p.read_text())
+        if not isinstance(body, dict):
+            raise ValueError(f"usage file is {type(body).__name__}, not an object")
         n = body.get("count")
         if not isinstance(n, int) or isinstance(n, bool) or n < 0:
             raise ValueError(f"count not a non-negative int: {n!r}")
         return n
-    except (json.JSONDecodeError, ValueError) as e:
+    except (json.JSONDecodeError, ValueError, OSError) as e:
         return f"CORRUPT:{e}"
 
 def bump_usage(L: Ledger, use_key: str) -> int:
@@ -305,13 +350,18 @@ def bump_usage(L: Ledger, use_key: str) -> int:
     durable_write(p, {"use_key": use_key, "count": n, "updated": now()})
     return n
 
-def record_history_count(L: Ledger, argv, artifacts, max_runs) -> int:
+def record_history_count(L: Ledger, argv, artifacts, max_runs):
     """Executions of THIS command visible in durable completion records (rev-7).
     Two purposes: (a) the use-budget counter file lives in broker state and would
     reset if state is wiped — records are the audit history, so the budget reads
     max(counter, history) (Claude re-pin-5: budgets must not reset on re-sign /
     state loss); (b) records with spawn_succeeded=False (never spawned) do NOT
-    count against the budget — a failed spawn consumed no execution."""
+    count against the budget — a failed spawn consumed no execution.
+    rev-8 (ChatGPT re-pin-6 3B): rev-7 silently SKIPPED unparseable/non-object
+    record files — a corrupt audit history then quietly lowered the count and
+    could re-grant a spent budget. Now any record file that cannot be parsed, or
+    parses to a non-object, returns a 'CORRUPT:<detail>' string and the caller
+    MUST refuse (fail closed); owner recovery = restore/remove the corrupt file."""
     d = L.root / "records"
     if not d.exists():
         return 0
@@ -319,9 +369,11 @@ def record_history_count(L: Ledger, argv, artifacts, max_runs) -> int:
     for f in sorted(d.glob("*.json")):
         try:
             rec = json.loads(f.read_text())
-        except json.JSONDecodeError:
-            continue
-        if not isinstance(rec, dict) or rec.get("spawn_succeeded") is False:
+        except (json.JSONDecodeError, OSError) as e:
+            return f"CORRUPT:{f.name}: {e}"
+        if not isinstance(rec, dict):
+            return f"CORRUPT:{f.name}: record is {type(rec).__name__}, not an object"
+        if rec.get("spawn_succeeded") is False:
             continue
         if (rec.get("argv") == argv and rec.get("max_runs") == max_runs
                 and rec.get("artifact_contract") == artifacts):
@@ -426,6 +478,15 @@ def run_pass(a, allowed_signers: Path, L: Ledger) -> int:
                            key=collision_key)
                 continue  # original untouched (still 'started' if it was); its own
                           # line recovers/disposes separately when it reappears
+        if st and st.get("status") == "unreadable-corrupt":
+            # rev-8 (Claude re-pin-6 non-blocking 1): the state file exists but is
+            # unreadable/corrupt. Its real status (possibly 'started' = executed
+            # once) is unknowable, so the request is HELD — no disposition, no
+            # execution — until owner recovery. A corrupt file can neither grant
+            # a re-execution nor silently blacklist the id.
+            log(f"HOLD {rid}: ledger state unreadable-corrupt — held for owner "
+                "recovery, nothing executed")
+            continue
         if st and st.get("status") == "started":
             # --- rev-7 blocker 2 (ChatGPT re-pin-5): before declaring UNPROVEN,
             # inspect the durable RECORD. A record written after a definite
@@ -508,8 +569,18 @@ def run_pass(a, allowed_signers: Path, L: Ledger) -> int:
                            f"(fail closed, §3.3 rev-7)", req_hash,
                    extra={"use_key": use_key, "budget_state": used})
             continue
-        used = max(used, record_history_count(L, entry["argv"], entry["artifacts"],
-                                              entry["max_runs"]))
+        hist = record_history_count(L, entry["argv"], entry["artifacts"],
+                                    entry["max_runs"])
+        if isinstance(hist, str):
+            # rev-8 (ChatGPT re-pin-6 3B): a corrupt execution-history record can
+            # never silently reduce the budget — refuse, owner restores/removes it.
+            refuse(L, rid, f"BUDGET-STATE-CORRUPT: durable execution history for "
+                           f"this command is unreadable ({hist}) — refusing to "
+                           f"execute; corrupt audit state must never grant runs "
+                           f"(fail closed, §3.3 rev-8)", req_hash,
+                   extra={"use_key": use_key, "history_state": hist})
+            continue
+        used = max(used, hist)
         if used >= entry["max_runs"]:
             refuse(L, rid, f"BUDGET-EXHAUSTED: this signed command has already been "
                            f"executed {used}/{entry['max_runs']} authorized time(s) "
@@ -525,18 +596,17 @@ def run_pass(a, allowed_signers: Path, L: Ledger) -> int:
         L.save(rid, "started", note=durable_note, req_hash=req_hash)
         err = None
         try:
-            cp = subprocess.run(entry["argv"], capture_output=True, text=True,
-                                timeout=3600, cwd=a.repo)
-            exit_code, stdout, stderr = cp.returncode, cp.stdout, cp.stderr
-        except subprocess.TimeoutExpired:
-            exit_code, stdout, stderr, err = None, "", "", "TIMEOUT exceeded 3600s"
+            proc = subprocess.Popen(entry["argv"], stdout=subprocess.PIPE,
+                                    stderr=subprocess.PIPE, cwd=a.repo)
         except Exception as e:
-            # rev-6 (Claude re-pin-4 condition 4) + rev-7 (Claude re-pin-5 residual):
-            # ANY exception from the spawn call means the process NEVER STARTED — no
-            # side effect is possible — so this is a DEFINITE failure record, not an
-            # uncertain 'started' outcome awaiting UNPROVEN on restart. Broadened from
-            # OSError so ValueError (NUL byte), IndexError (empty argv) and any future
-            # spawn-path error cannot crash the pass after 'started' was written.
+            # rev-6 (Claude re-pin-4 condition 4) + rev-7 (Claude re-pin-5 residual)
+            # + rev-8 (Claude re-pin-6 REQUIRED): only the CONSTRUCTION of the child
+            # is a definite spawn failure. Popen failed => the process NEVER
+            # STARTED — no side effect is possible — so this is a DEFINITE failure
+            # record, not an uncertain 'started' awaiting UNPROVEN on restart.
+            # Broadened from OSError so ValueError (NUL byte), IndexError (empty
+            # argv) and any future spawn-path error cannot crash the pass after
+            # 'started' was written.
             exit_code, stdout, stderr = None, "", ""
             err = f"SPAWN-FAILED ({type(e).__name__}, never executed): {e}"
             durable_write(L.record(rid), {
@@ -554,7 +624,32 @@ def run_pass(a, allowed_signers: Path, L: Ledger) -> int:
                    req_hash=req_hash)
             log(f"SPAWN-FAILED {rid}: {e}")
             continue
-        bump_usage(L, use_key)
+        # rev-8 (Claude re-pin-6 REQUIRED — the rev-7 regression): once Popen has
+        # returned, THE CHILD EXISTS. Every failure from here on is POST-SPAWN:
+        # the outcome may be unknown but the process ran, so it must NEVER be
+        # recorded spawn_succeeded=False "never executed", and the budget MUST be
+        # consumed before anything touches output decoding. (rev-7 bug:
+        # subprocess.run(text=True) decoded strictly AFTER execution; a command
+        # printing non-UTF-8 raised UnicodeDecodeError inside the except-Exception
+        # "never executed" branch — executed command, zero budget consumed, re-runnable.)
+        try:
+            raw_out, raw_err = proc.communicate(timeout=3600)
+            exit_code = proc.returncode
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            raw_out, raw_err = proc.communicate()
+            exit_code, err = None, "TIMEOUT exceeded 3600s"
+        except Exception as e:
+            # Post-spawn uncertainty (communicate on captured pipes should not
+            # raise; if it ever does): outcome UNKNOWN, child existed. Conservative
+            # path: uncertain record, budget consumed, never 'never executed'.
+            raw_out, raw_err = b"", b""
+            exit_code, err = None, f"POST-SPAWN-UNCERTAIN ({type(e).__name__}): {e}"
+        bump_usage(L, use_key)   # consumed the moment the child was run, pre-decode
+        # Lossy decode BY DESIGN: invalid bytes can never raise and can never
+        # un-count an execution. Evidence keeps U+FFFD where bytes were invalid.
+        stdout = raw_out.decode("utf-8", errors="replace")
+        stderr = raw_err.decode("utf-8", errors="replace")
         durable_write(L.record(rid), {
             "id": rid, "wave": plan["wave"], "plan_digest": plan.get("plan_digest"),
             "signed_by": plan.get("signed_by"),

@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
-"""Exercise rev-5 + rev-6 + rev-7 P0 repairs against the broker.
+"""Exercise rev-5 + rev-6 + rev-7 + rev-8 P0 repairs against the broker.
 
 Real mechanisms throughout: ssh-keygen -Y sign/verify for plan authorization, a
 local bare git remote (with a real rejecting pre-receive hook) for publish paths,
 real ssh-keygen fingerprint inventories for the revoke script, real subprocess
 crash/restart simulations (fresh runner PROCESS per pass). Two instrumented
-exceptions: P0-12 uses unittest.mock ONLY to COUNT os.fsync calls, and P0-17c traps
-subprocess.run (argv-scoped) to inject ONE non-OSError at the spawn call; the writes
-themselves are real. There is no sshd involvement anywhere — the revoke tests
-operate on authorized_keys FILES directly (the docstring previously overclaimed
-"no mocks"; corrected rev-7, ChatGPT re-pin-5 P1). No network. Checks:
+exceptions: P0-12 uses unittest.mock ONLY to COUNT os.fsync calls, and P0-17c
+traps subprocess.Popen (argv-scoped) to inject ONE non-OSError at the spawn
+call; the writes themselves are real. There is no sshd involvement anywhere —
+the revoke tests operate on authorized_keys FILES directly (the docstring
+previously overclaimed "no mocks"; corrected rev-7, ChatGPT re-pin-5 P1). No
+network. Checks:
   P0-1 unsigned plan            -> nothing executes; requests stay PENDING
                                   (rev-7: unverifiable is never terminal) and a
                                   later signature runs the SAME id
@@ -27,6 +28,8 @@ operate on authorized_keys FILES directly (the docstring previously overclaimed
                                   with the next line (rev-7, Claude re-pin-5)
   P0-9c empty-argv plan entry   -> plan invalid -> PENDING; never spawns, never
                                   crashes the pass (rev-7)
+  P0-9d plan not an object /    -> explicit PENDING, never an uncaught
+      commands not a list          structural exception (rev-8, ChatGPT re-pin-6)
   P0-10 --once                  -> exactly one cycle (cycle-counted), exact exit 0
   P0-11 revoke script           -> selective by fingerprint; owner key retained;
                                   inventory-wide expected-state verification;
@@ -46,17 +49,29 @@ operate on authorized_keys FILES directly (the docstring previously overclaimed
                                   argv+artifacts+max_runs, not the whole plan)
   P0-16 plan absent -> pending  -> later signature authorizes; absence never
                                   blacklists an id (rev-6, Claude condition 3)
-  P0-16c bad signature -> pending -> later valid signature supersedes; unverifiable
-                                  is never terminal (rev-7, Claude required change)
   P0-17 spawn failure           -> definite failed-spawn record, never UNPROVEN;
                                   ANY spawn exception, not just OSError (rev-6
                                   condition 4 + rev-7 residual)
+  P0-17d post-spawn decode      -> a command printing invalid UTF-8 is recorded
+                                  EXECUTED (spawn_succeeded true), budget consumed,
+                                  never re-run under a fresh id (rev-8, Claude
+                                  re-pin-6 REQUIRED regression)
   P0-18 record-before-state     -> crash between definite record and state save
                                   RECOVERS the definite outcome, never degrades to
-                                  UNPROVEN (rev-7, ChatGPT blocker 2)
+                                  UNPROVEN (rev-7, ChatGPT blocker 2); the definite
+                                  SPAWN-FAILURE record variant is covered too
+                                  (rev-8, ChatGPT re-pin-6 P0)
   P0-19 corrupt budget state    -> FAILS CLOSED with refusal; zero executions;
                                   owner file removal is the recovery path (rev-7,
-                                  ChatGPT blocker 3)
+                                  ChatGPT blocker 3); non-object usage JSON and
+                                  corrupt execution-history records fail closed
+                                  too (rev-8, ChatGPT re-pin-6 3A/3B)
+  P0-20 budget vs state loss    -> usage counter removed but durable execution
+                                  record kept = budget still exhausted (rev-8,
+                                  ChatGPT Q2 dedicated coverage for row 12)
+  P0-21 corrupt state file      -> request HELD (unreadable-corrupt), never
+                                  re-executed, never silently blacklisted (rev-8,
+                                  Claude re-pin-6 non-blocking 1)
 Usage: python3 scripts/qa/test_broker_p0.py
 """
 import hashlib
@@ -440,6 +455,27 @@ def main():
         run_broker(tmp, home)
         check("P0-9c2 corrected signature then executes the same id", marker9c.exists())
 
+        # P0-9d rev-8 (ChatGPT re-pin-6 P1): a syntactically VALID JSON plan whose
+        # top level is a LIST (not an object) used to crash verify_plan with an
+        # uncaught AttributeError instead of the promised PENDING path.
+        auth9d = authority_clone(tmp)
+        pf9d = auth9d / "workflows/m0-plans/open.json"
+        argv9d = ["touch", str(Path(tmp) / "marker9d")]
+        list9d = [{"argv": argv9d, "artifacts": [], "max_runs": 1}]   # valid JSON, WRONG shape
+        pf9d.write_text(json.dumps(list9d))
+        for stale in (pf9d.parent / "open.json.sig", pf9d.parent / "open.sig"):
+            if stale.exists():
+                stale.unlink()
+        r9d = sh("ssh-keygen", "-Y", "sign", "-f", str(key), "-n", "file", str(pf9d))
+        assert r9d.returncode == 0, r9d.stderr
+        stage_and_push(auth9d, "structurally invalid plan (list top level)")
+        enqueue(clone, [{"id": "r9d", "argv": argv9d}])
+        rc9d = run_broker(tmp, home)
+        check("P0-9d valid-JSON list plan -> PENDING, no crash, no exec",
+              rc9d.returncode == 0 and "PENDING r9d" in rc9d.stdout
+              and not (Path(tmp) / "marker9d").exists(),
+              f"rc={rc9d.returncode} out={rc9d.stdout[-180:]} err={rc9d.stderr[-120:]}")
+
         # P0-10 --once performs exactly ONE cycle (decision-line counted) and exits 0.
         # Stage exactly one fresh in-plan request so the counted cycle count is 1.
         argv10 = ["echo", "once-10"]
@@ -710,26 +746,27 @@ def main():
         check("P0-17b definite spawn failure never becomes UNPROVEN after restart",
               not unp and len(r17dup) == 1)
 
-        # P0-17c rev-7 (ChatGPT re-pin-5 P1): the spawn catch is `except Exception`
-        # — a NON-OSError raised at spawn (internal failure) never starts the
-        # process, is recorded definite (spawn_succeeded=False), never 'started'.
-        # In-process: subprocess.run is trapped by argv so only the request spawn
-        # is affected; the broker's own git calls run untouched.
+        # P0-17c rev-7 (ChatGPT re-pin-5 P1) / rev-8: the spawn catch is
+        # `except Exception` around Popen CONSTRUCTION — a NON-OSError raised at
+        # spawn (internal failure) never starts the process, is recorded definite
+        # (spawn_succeeded=False), never 'started'. In-process: subprocess.Popen is
+        # trapped by argv so only the request spawn is affected; the broker's own
+        # git subprocess.run calls run untouched.
         mk17c = Path(tmp) / "marker17c"
         write_plan(clone, [["touch", str(mk17c)]])
         sign_plan_authority(tmp, key)
         enqueue(clone, [{"id": "r17c", "argv": ["touch", str(mk17c)]}])
         import types as _types
-        real_run = subprocess.run
-        def trap_run(cmd, *a2, **k2):
+        real_popen = subprocess.Popen
+        def trap_popen(cmd, *a2, **k2):
             if isinstance(cmd, (list, tuple)) and cmd and cmd[0] == "touch":
                 raise ValueError("injected non-OSError at spawn")
-            return real_run(cmd, *a2, **k2)
+            return real_popen(cmd, *a2, **k2)
         a17 = _types.SimpleNamespace(repo=str(clone), branch="m0-evidence", poll=1,
                                      state_dir=str(state), owner_principal=PRINCIPAL)
         L17 = runner_mod.Ledger(str(state))
         signers17 = Path(tmp) / "allowed_signers"
-        with mock.patch.object(runner_mod.subprocess, "run", side_effect=trap_run):
+        with mock.patch.object(runner_mod.subprocess, "Popen", side_effect=trap_popen):
             runner_mod.run_pass(a17, signers17, L17)
         recs = all_records(clone)
         r17c = next((x for x in recs if x.get("id") == "r17c"), None)
@@ -740,6 +777,45 @@ def main():
               and "SPAWN-FAILED (ValueError" in r17c.get("error", "")
               and not mk17c.exists() and s17c.get("status") != "started",
               str(r17c)[:250])
+
+        # P0-17d rev-8 (Claude re-pin-6 REQUIRED): rev-7's subprocess.run(text=True)
+        # decoded output strictly AFTER the child ran; invalid UTF-8 raised
+        # UnicodeDecodeError INSIDE the except-Exception "never executed" branch ->
+        # spawn_succeeded=False, budget NOT consumed -> an executed command could
+        # run again. rev-8 separates Popen (spawn) from communicate+lossy decode.
+        # (printf \377\376 is valid shell — only the OUTPUT bytes are invalid UTF-8.)
+        counter17d = Path(tmp) / "counter17d.txt"
+        script17d = clone / "tools" / "job17d.sh"
+        script17d.parent.mkdir(parents=True, exist_ok=True)
+        script17d.write_text(f"#!/bin/sh\nprintf '\\377\\376'\n"
+                             f"echo x >> {counter17d}\n")
+        script17d.chmod(0o755)
+        argv17d = ["sh", str(script17d)]
+        write_plan(clone, [argv17d])
+        sign_plan_authority(tmp, key)
+        enqueue(clone, [{"id": "r17d", "argv": argv17d}])
+        run_broker(tmp, home)
+        recs = all_records(clone)
+        r17d = next((x for x in recs if x.get("id") == "r17d"), None)
+        check("P0-17d invalid-UTF8 output -> recorded EXECUTED (spawn_succeeded=true), "
+              "lossy decode, never 'never executed'",
+              r17d is not None and r17d.get("spawn_succeeded") is True
+              and r17d.get("exit") == 0 and counter17d.exists()
+              and "\ufffd" in r17d.get("stdout", ""),
+              str(r17d)[:300])
+        run_broker(tmp, home, "--once")   # restart over the same queue
+        check("P0-17d2 executed bad-UTF8 command never re-executes across restart",
+              counter17d.read_text().count("x") == 1,
+              counter17d.read_text())
+        enqueue(clone, [{"id": "r17d2", "argv": argv17d}])   # fresh request id
+        run_broker(tmp, home)
+        recs = all_records(clone)
+        r17d2 = next((x for x in recs if x.get("id") == "r17d2"), None)
+        check("P0-17d3 post-decode-failure execution consumed the budget "
+              "(BUDGET-EXHAUSTED under fresh id, second run refused)",
+              r17d2 is not None and "BUDGET-EXHAUSTED" in r17d2.get("reason", "")
+              and counter17d.read_text().count("x") == 1,
+              str(r17d2)[:250])
 
         # P0-18 rev-7 blocker 2 (ChatGPT re-pin-5): a crash AFTER the durable
         # completion record but BEFORE the state save leaves status 'started' with a
@@ -773,6 +849,42 @@ def main():
         check("P0-18b recovered definite outcome never RE-EXECUTES the command",
               not c18.exists())
 
+        # P0-18c rev-8 (ChatGPT re-pin-6 P0): the EXACT rev-6 failure window —
+        # 'started' state + durable record with spawn_succeeded=FALSE (crash
+        # between the definite spawn-failure record and the state save). Recovery
+        # must restore the definite spawn failure: never UNPROVEN, never re-exec.
+        c18c = Path(tmp) / "counter18c.txt"
+        script18c = clone / "tools" / "job18c.sh"
+        argv18c = ["sh", str(script18c)]
+        script18c.write_text(f"#!/bin/sh\necho x >> {c18c}\n")
+        script18c.chmod(0o755)
+        write_plan(clone, [argv18c])
+        sign_plan_authority(tmp, key)
+        line18c = json.dumps({"id": "r18c", "argv": argv18c})
+        hash18c = hashlib.sha256(line18c.encode()).hexdigest()
+        (state / "state").mkdir(parents=True, exist_ok=True)
+        (state / "state" / "r18c.json").write_text(json.dumps(
+            {"id": "r18c", "status": "started", "updated": "2026-11-25T00:00:00+00:00",
+             "note": f"argv={json.dumps(argv18c)}", "request_line_sha256": hash18c}))
+        (state / "records").mkdir(parents=True, exist_ok=True)
+        (state / "records" / "r18c.json").write_text(json.dumps(
+            {"id": "r18c", "argv": argv18c, "exit": None, "stdout": "", "stderr": "",
+             "error": "SPAWN-FAILED (FileNotFoundError, never executed): sim",
+             "spawn_succeeded": False, "request_line_sha256": hash18c,
+             "max_runs": 1, "artifact_contract": []}))
+        enqueue(clone, [{"id": "r18c", "argv": argv18c}])
+        rp18c = run_broker(tmp, home)
+        recs = all_records(clone)
+        unp18c = [x for x in recs if x.get("id") == "r18c" and x.get("unproven") is True]
+        s18c = json.loads((state / "state" / "r18c.json").read_text())
+        check("P0-18c started + spawn_succeeded=false record -> RECOVERED definite, "
+              "never UNPROVEN",
+              "RECOVERED r18c" in rp18c.stdout and not unp18c
+              and s18c.get("status") in ("executed", "published"),
+              f"stdout={rp18c.stdout[-200:]} state={s18c.get('status')}")
+        check("P0-18c2 crash-window spawn failure never re-executes",
+              not c18c.exists())
+
         # P0-19 rev-7 blocker 3 (ChatGPT re-pin-5): a CORRUPT durable budget file
         # must fail CLOSED — corrupt authorization state can never grant runs.
         mk19 = Path(tmp) / "marker19"
@@ -795,6 +907,108 @@ def main():
         run_broker(tmp, home)
         check("P0-19b owner removed corrupt file -> budget path executes again",
               mk19.exists())
+
+        # ================= rev-8 budget-history & corrupt-state block =================
+        # P0-20 rev-8 (ChatGPT re-pin-6 Q2 REQUIRED): dedicated coverage for the
+        # durable-record budget history that row 12 of the re-pin-6 table declared
+        # untested.
+
+        # P0-20a/b executed command + usage counter deleted -> the durable execution
+        # record preserves max_runs; a fresh request id is still refused.
+        mk20 = Path(tmp) / "marker20"
+        argv20 = ["touch", str(mk20)]
+        write_plan(clone, [argv20])
+        sign_plan_authority(tmp, key)
+        enqueue(clone, [{"id": "r20", "argv": argv20}])
+        run_broker(tmp, home)
+        check("P0-20a first execution runs the command", mk20.exists())
+        use20 = runner_mod.canonical_sha256([argv20, [], 1])
+        (state / "usage" / f"{use20}.json").unlink()      # simulated state loss
+        mk20.unlink()
+        enqueue(clone, [{"id": "r20b", "argv": argv20}])  # fresh request id
+        run_broker(tmp, home)
+        r20b = next((x for x in all_records(clone) if x.get("id") == "r20b"), None)
+        check("P0-20b usage counter wiped -> durable-record history preserves budget "
+              "(BUDGET-EXHAUSTED under fresh id, no second execution)",
+              r20b is not None and "BUDGET-EXHAUSTED" in r20b.get("reason", "")
+              and not mk20.exists(), str(r20b)[:220])
+
+        # P0-20c a spawn_succeeded=false record consumes NO budget (never spawned):
+        # a fresh id with the exact never-spawned argv REACHES SPAWN again (a new
+        # definite spawn attempt) instead of a BUDGET-EXHAUSTED refusal. (argv17
+        # is a nonexistent binary — reaching spawn at all IS the budget grant.)
+        r17rec = next((x for x in all_records(clone) if x.get("id") == "r17"
+                       and x.get("spawn_succeeded") is False), None)
+        if r17rec is not None:
+            argv20c = r17rec["argv"]
+            write_plan(clone, [argv20c])
+            sign_plan_authority(tmp, key)
+            enqueue(clone, [{"id": "r20c", "argv": argv20c}])
+            run_broker(tmp, home)
+            recs20c = [x for x in all_records(clone) if x.get("id") == "r20c"]
+            exhausted = [x for x in recs20c if "BUDGET-EXHAUSTED" in x.get("reason", "")]
+            spawn_again = any(x.get("spawn_succeeded") is False
+                              and "SPAWN-FAILED" in x.get("error", "")
+                              for x in recs20c)
+            check("P0-20c spawn_succeeded=false record consumed no budget (fresh-id "
+                  "same argv reaches spawn again, never BUDGET-EXHAUSTED)",
+                  spawn_again and not exhausted, str(recs20c)[:220])
+        else:
+            check("P0-20c spawn_succeeded=false record consumed no budget", False,
+                  "P0-17 never-spawned record missing — cannot test budget exclusion")
+
+        # P0-20d structurally invalid usage JSON (valid syntax, wrong shape: [])
+        # -> explicit BUDGET-STATE-CORRUPT refusal, no crash, no execution (rev-8 3A).
+        mk20d = Path(tmp) / "marker20d"
+        argv20d = ["touch", str(mk20d)]
+        write_plan(clone, [argv20d])              # must clear the plan gate first —
+        sign_plan_authority(tmp, key)             # budget check runs AFTER verification
+        use20d = runner_mod.canonical_sha256([argv20d, [], 1])
+        (state / "usage").mkdir(parents=True, exist_ok=True)
+        (state / "usage" / f"{use20d}.json").write_text("[]")   # valid JSON, not an object
+        enqueue(clone, [{"id": "r20d", "argv": argv20d}])
+        run_broker(tmp, home)
+        r20d = next((x for x in all_records(clone) if x.get("id") == "r20d"), None)
+        check("P0-20d usage JSON '[]' (wrong shape) -> BUDGET-STATE-CORRUPT refusal, "
+              "no crash, no exec",
+              r20d is not None and "BUDGET-STATE-CORRUPT" in r20d.get("reason", "")
+              and not mk20d.exists(), str(r20d)[:220])
+
+        # P0-20e corrupt execution-HISTORY record -> fail closed, NOT silently
+        # skipped: an unparseable record refuses a brand-new command even though
+        # the intact history around it would grant a run (rev-8 3B).
+        mk20e = Path(tmp) / "marker20e"
+        argv20e = ["touch", str(mk20e)]
+        write_plan(clone, [argv20e])              # clear the plan gate first
+        sign_plan_authority(tmp, key)
+        (state / "records" / "zz-corrupt.json").write_text("{not json at all")
+        enqueue(clone, [{"id": "r20e", "argv": argv20e}])
+        run_broker(tmp, home)
+        r20e = next((x for x in all_records(clone) if x.get("id") == "r20e"), None)
+        check("P0-20e corrupt execution-history record -> BUDGET-STATE-CORRUPT fail "
+              "closed (never silently skipped), no exec",
+              r20e is not None and "BUDGET-STATE-CORRUPT" in r20e.get("reason", "")
+              and not mk20e.exists(), str(r20e)[:220])
+        # Owner recovery (same as P0-19b) before the next scenario: while the
+        # corrupt record stands, EVERY dispatch refuses fail-closed — proven
+        # behavior, and 20f must start from a clean history.
+        (state / "records" / "zz-corrupt.json").unlink()
+
+        # P0-20f corrupt REQUEST STATE file is held, not treated as unseen (never
+        # re-executed); the broker keeps running other requests.
+        write_plan(clone, [["touch", str(Path(tmp) / "marker20g")]])
+        sign_plan_authority(tmp, key)
+        (state / "state" / "r20f.json").write_text("{broken")
+        enqueue(clone, [{"id": "r20f", "argv": ["touch", str(Path(tmp) / "marker20f")]},
+                        {"id": "r20g", "argv": ["touch", str(Path(tmp) / "marker20g")]}])
+        rp20f = run_broker(tmp, home)
+        s20f = (state / "state" / "r20f.json").read_text()
+        check("P0-20f corrupt request-state file -> LEDGER-STATE-CORRUPT held, "
+              "never re-executed, other requests still run",
+              "LEDGER-STATE-CORRUPT r20f" in rp20f.stdout and s20f == "{broken"
+              and not (Path(tmp) / "marker20f").exists()
+              and (Path(tmp) / "marker20g").exists(),
+              f"stdout={rp20f.stdout}")
 
     print("FAILS:", FAILS or "none")
     sys.exit(1 if FAILS else 0)
