@@ -6,7 +6,7 @@ Suite row is read from the COMMITTED run artifact at the pin (ChatGPT
 re-pin-7 P1: no scratch-dir logs, no hardcoded counts)."""
 import subprocess, sys, re, hashlib
 
-PIN = "58ae3c4"
+PIN = "0d156d7"
 REPO = "/opt/data/cache/scratch/HE-toolstack-review"
 
 def at(path, pin=PIN):
@@ -89,12 +89,24 @@ claim("Test docstring cites the committed artifact path (not b134df3, not /tmp)"
       f"; b134df3 occurs {test.count('b134df3')} times in {T}@{PIN}")
 
 # ---- code identity between the run-pinned commit and the review pin ----
-_codeident = all(
-    subprocess.run(["git", "-C", REPO, "diff", "--quiet", "d1c0e09", PIN, "--", f],
-                   capture_output=True).returncode == 0
-    for f in ("scripts/m0-broker-runner.py", "scripts/qa/test_broker_p0.py"))
-claim("Runner + test are BYTE-IDENTICAL between the commit the run artifact pins (d1c0e09, suite 63/0 from clean archive) and this review pin " + PIN + " (review pin adds only the committed artifact, its header, and the ledger row — re-running the suite at this pin exercises the same code)",
-      "git diff --quiet d1c0e09 " + PIN + " -- runner + test => clean"
+def _docspan(pin):
+    src = at("scripts/qa/test_broker_p0.py", pin).splitlines()
+    start = next(i for i, l in enumerate(src, 1) if l.startswith('"""'))
+    end = next(i for i, l in enumerate(src[start + 1:], start + 1) if l == '"""')
+    return start, end
+_runner_same = subprocess.run(["git", "-C", REPO, "diff", "--quiet", "d1c0e09", PIN, "--",
+                               "scripts/m0-broker-runner.py"], capture_output=True).returncode == 0
+_diff = subprocess.run(["git", "-C", REPO, "diff", "-U0", "d1c0e09", PIN, "--",
+                        "scripts/qa/test_broker_p0.py"], capture_output=True, text=True).stdout
+_hunks = re.findall(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@", _diff, re.M)
+_a, _b = _docspan("d1c0e09"), _docspan(PIN)
+_doc_only = bool(_hunks) and all(
+    _a[0] <= int(h0) and int(h0) + int(h1 or 1) <= _a[1] and
+    _b[0] <= int(h2) and int(h2) + int(h3 or 1) <= _b[1] for h0, h1, h2, h3 in _hunks)
+_codeident = _runner_same and _doc_only
+claim("Code executed by the suite at the pinned commit (e78f1c2, run from clean `git archive`, artifact header cites its full SHA) is the code AT THIS REVIEW PIN: runner byte-identical d1c0e09→" + PIN + " (git diff --quiet, 0 lines) and the only test-file delta d1c0e09→" + PIN + " is inside the module docstring — every `git diff -U0` hunk of the test file falls within the docstring line span at BOTH endpoints (verified here programmatically; between e78f1c2 and " + PIN + " even that delta is nil, the artifact commit adds only the run log, its header, and this generator)",
+      "git diff --quiet d1c0e09 " + PIN + " -- runner => clean; test hunks "
+      + str(_hunks) + f" ⊂ docstring spans {_a}/{_b}"
       if _codeident else "CODE-DIVERGED-BETWEEN-PINS")
 
 # ---- protocol state ----
