@@ -10,12 +10,14 @@ traps subprocess.Popen (argv-scoped) to inject ONE non-OSError at the spawn
 call; the writes themselves are real. There is no sshd involvement anywhere —
 the revoke tests operate on authorized_keys FILES directly (the docstring
 previously overclaimed "no mocks"; corrected rev-7, ChatGPT re-pin-5 P1). No
-network. Suite: 26 scenarios / 63 checks — 63 PASS / 0 FAIL, freshly re-run at
-the review pin from a clean `git archive` of that pin; the run log is COMMITTED
-at scripts/qa/run-artifacts/rev9_test_final.log (ChatGPT re-pin-7 P1: the result
+network. Suite: 20 scenarios / 63 checks — 63 PASS / 0 FAIL / exit 0, run at
+the code pin from a clean `git archive` of it; the run log is COMMITTED
+at scripts/qa/run-artifacts/rev9_test_atpin.log (ChatGPT re-pin-7 P1: the result
 row cites the artifact committed IN this repo, not a /tmp scratch log; the
 review pin is recorded inside that artifact's header, not hardcoded here so
-this line can never go stale between pins). Checks:
+this line can never go stale between pins; scenario/check counts below are
+re-counted mechanically FROM the committed artifact by the claim-table
+generator, never asserted from this file (ChatGPT re-pin-7 P1-2). Checks:
   P0-1 unsigned plan            -> nothing executes; requests stay PENDING
                                   (rev-7: unverifiable is never terminal) and a
                                   later signature runs the SAME id
@@ -74,9 +76,10 @@ this line can never go stale between pins). Checks:
   P0-20 budget vs state loss    -> usage counter removed but durable execution
                                   record kept = budget still exhausted (rev-8,
                                   ChatGPT Q2 dedicated coverage for row 12)
-  P0-21 corrupt state file      -> request HELD (unreadable-corrupt), never
+  P0-20f–h corrupt request state -> request HELD (LEDGER-STATE-CORRUPT, incl.
+                                  non-object and unreadable file), never
                                   re-executed, never silently blacklisted (rev-8,
-                                  Claude re-pin-6 non-blocking 1)
+                                  Claude re-pin-6 non-blocking 1; P0-20 family)
 Usage: python3 scripts/qa/test_broker_p0.py
 """
 import hashlib
