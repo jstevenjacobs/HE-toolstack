@@ -162,12 +162,14 @@ class Ledger:
             return None
         try:
             body = json.loads(p.read_text())
-        except json.JSONDecodeError as e:
+        except (json.JSONDecodeError, OSError) as e:
             # rev-8 (Claude re-pin-6 non-blocking 1): pending() tolerates corrupt
             # state files; load() must not crash the whole pass on one. NEVER
             # return None here (that means 'never seen' -> would RE-EXECUTE).
             # A corrupt state file returns an 'unreadable-corrupt' sentinel that
             # run_pass HOLDS (no disposition, no execution) and logs loudly.
+            # rev-9 (ChatGPT re-pin-7 P1): OSError (exists but unreadable) is the
+            # SAME corruption class as malformed JSON — sentinel, never a crash.
             log(f"LEDGER-STATE-CORRUPT {rid}: {e} — held, never re-executed")
             return {"id": rid, "status": "unreadable-corrupt", "note": str(e)}
         if not isinstance(body, dict):
@@ -190,7 +192,16 @@ class Ledger:
             for f in d.glob("*.json"):
                 try:
                     st = json.loads(f.read_text())
-                except json.JSONDecodeError:
+                except (json.JSONDecodeError, OSError):
+                    # rev-9 (ChatGPT re-pin-7 P1): unreadable = corrupt, skip here;
+                    # the AUTHORITATIVE read is load(), which holds such a request.
+                    continue
+                if not isinstance(st, dict):
+                    # rev-9 (ChatGPT re-pin-7 P1): valid JSON that is not an object
+                    # (e.g. []) used to raise AttributeError right here and kill the
+                    # publication phase. Skip; load() holds the request.
+                    log(f"PENDING-SKIP {f.stem}: state is "
+                        f"{type(st).__name__}, not an object (held via load)")
                     continue
                 if st.get("status") in ("executed", "dispositioned"):
                     out.append(f.stem)
@@ -241,9 +252,12 @@ def verify_plan(repo: str, allowed_signers: Path, principal: str) -> dict:
         return status
     try:
         raw_plan = json.loads(plan_file.read_text())
-    except (json.JSONDecodeError, OSError) as e:
+    except (json.JSONDecodeError, OSError, ValueError) as e:
         # rev-7: structurally unreadable body => unverifiable (pending), same rule.
         # rev-8 (ChatGPT re-pin-6): an unreadable file (OSError) is the SAME class.
+        # rev-9 (Claude re-pin-7 non-blocking 1): a signed plan with INVALID UTF-8
+        # raises UnicodeDecodeError (a ValueError) from read_text() itself — must
+        # land pending, not crash every pass.
         status["why"] = f"plan JSON invalid/unreadable ({e}) — requests remain pending"
         return status
     # rev-8 (ChatGPT re-pin-6 P1): the decoded body must be an OBJECT with a list
@@ -309,7 +323,14 @@ def digest_artifacts(base: Path, artifacts: list) -> dict:
     out = {}
     for a in artifacts:
         p = base / a["path"]
-        observed = hashlib.sha256(p.read_bytes()).hexdigest() if p.exists() else "MISSING"
+        try:
+            # rev-9 (Claude re-pin-7 non-blocking 2): read_bytes() on a directory
+            # or unreadable path raises (IsADirectory/PermissionError) — that is
+            # an artifact MISMATCH, refuse-with-evidence, never a pass crash.
+            observed = (hashlib.sha256(p.read_bytes()).hexdigest()
+                        if p.exists() else "MISSING")
+        except (OSError, ValueError) as e:
+            observed = f"UNREADABLE ({type(e).__name__})"
         out[a["path"]] = {"observed": observed, "pinned": a["sha256"],
                           "match": observed == a["sha256"]}
     return out
@@ -561,24 +582,27 @@ def run_pass(a, allowed_signers: Path, L: Ledger) -> int:
         used = usage_count(L, use_key)
         if isinstance(used, str):
             # rev-7 blocker 3 (ChatGPT re-pin-5): the durable budget file EXISTS but is
-            # corrupt/unparseable -> FAIL CLOSED. Never read corrupt state as zero uses;
-            # recovery requires explicit owner intervention (delete/repair the file).
-            refuse(L, rid, f"BUDGET-STATE-CORRUPT: durable usage state for this signed "
-                           f"command is unreadable ({used}) — refusing to execute; "
-                           f"corrupt authorization state must never grant runs "
-                           f"(fail closed, §3.3 rev-7)", req_hash,
-                   extra={"use_key": use_key, "budget_state": used})
+            # corrupt/unparseable -> FAIL CLOSED. Never read corrupt state as zero uses.
+            # rev-9 (Claude re-pin-7 BLOCKING): fail closed = HOLD, not terminal
+            # refuse(). A refusal dispositioned the id forever, so an owner who
+            # REPAIRED the budget file could never run the original id again —
+            # inconsistent with "unverifiable is never terminal" (re-pin-4 cond. 3)
+            # and with the corrupt-request-state hold. A HOLD writes no disposition
+            # and executes nothing: after the owner repairs/removes the corrupt
+            # file, the SAME id runs exactly once.
+            log(f"BUDGET-STATE-CORRUPT {rid}: durable usage state for this signed "
+                f"command is unreadable ({used}) — HELD, nothing executed; repair "
+                f"the file and the same request id runs again (fail closed, §3.3 rev-9)")
             continue
         hist = record_history_count(L, entry["argv"], entry["artifacts"],
                                     entry["max_runs"])
         if isinstance(hist, str):
             # rev-8 (ChatGPT re-pin-6 3B): a corrupt execution-history record can
-            # never silently reduce the budget — refuse, owner restores/removes it.
-            refuse(L, rid, f"BUDGET-STATE-CORRUPT: durable execution history for "
-                           f"this command is unreadable ({hist}) — refusing to "
-                           f"execute; corrupt audit state must never grant runs "
-                           f"(fail closed, §3.3 rev-8)", req_hash,
-                   extra={"use_key": use_key, "history_state": hist})
+            # never silently reduce the budget. rev-9 (Claude re-pin-7): HOLD, not
+            # terminal refuse — same repair-then-rerun path as corrupt usage.
+            log(f"BUDGET-STATE-CORRUPT {rid}: durable execution history for this "
+                f"command is unreadable ({hist}) — HELD, nothing executed; repair "
+                f"the record and the same request id runs again (§3.3 rev-9)")
             continue
         used = max(used, hist)
         if used >= entry["max_runs"]:
@@ -595,6 +619,8 @@ def run_pass(a, allowed_signers: Path, L: Ledger) -> int:
         durable_note = f"argv={json.dumps(entry['argv'])}"
         L.save(rid, "started", note=durable_note, req_hash=req_hash)
         err = None
+        exit_code = None   # rev-9: bound from the top so the cleanup guard below
+                           # can branch on it without an UnboundLocalError window
         try:
             proc = subprocess.Popen(entry["argv"], stdout=subprocess.PIPE,
                                     stderr=subprocess.PIPE, cwd=a.repo)
@@ -632,17 +658,47 @@ def run_pass(a, allowed_signers: Path, L: Ledger) -> int:
         # subprocess.run(text=True) decoded strictly AFTER execution; a command
         # printing non-UTF-8 raised UnicodeDecodeError inside the except-Exception
         # "never executed" branch — executed command, zero budget consumed, re-runnable.)
+        # rev-9 (ChatGPT re-pin-7 BLOCKER): an exception raised INSIDE the
+        # TimeoutExpired handler (proc.kill()/reap) used to escape the generic
+        # except entirely — the child ran, yet control left before bump_usage and
+        # the durable record, leaving 'started' + no record + an unconsumed budget
+        # (fresh-id re-execution). Fix: the whole post-spawn region is wrapped so
+        # NO post-spawn exception can escape; cleanup failures land in the same
+        # POST-SPAWN-UNCERTAIN branch. Invariant: a successful Popen construction
+        # implies bump_usage + a durable spawn_succeeded=True record follow on
+        # every path. If bump_usage itself raises, the 'started' state plus the
+        # final-ly reaped child are caught by the restart UNPROVEN path.
+        child_ran = False
         try:
-            raw_out, raw_err = proc.communicate(timeout=3600)
-            exit_code = proc.returncode
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            raw_out, raw_err = proc.communicate()
-            exit_code, err = None, "TIMEOUT exceeded 3600s"
+            try:
+                raw_out, raw_err = proc.communicate(timeout=3600)
+                exit_code = proc.returncode
+            except subprocess.TimeoutExpired:
+                child_ran = True   # certainly ran
+                exit_code, err = None, "TIMEOUT exceeded 3600s"
+                # rev-9 (ChatGPT re-pin-7 BLOCKER): err is set BEFORE cleanup, and
+                # kill/reap is guarded HERE, so a raising kill()/communicate() can
+                # never escape to the generic handler (which would replace the
+                # TIMEOUT context) or past bump_usage below.
+                try:
+                    proc.kill()
+                    raw_out, raw_err = proc.communicate()
+                except Exception as e2:
+                    raw_out, raw_err = b"", b""
+                    err += f"; cleanup failed ({type(e2).__name__}): {e2}"
         except Exception as e:
             # Post-spawn uncertainty (communicate on captured pipes should not
             # raise; if it ever does): outcome UNKNOWN, child existed. Conservative
             # path: uncertain record, budget consumed, never 'never executed'.
+            # rev-9 (Claude re-pin-7 non-blocking 3): kill + reap the child HERE so
+            # an uncertain outcome never leaves a live orphan holding the pipes.
+            # (If communicate() succeeded, this kill/reap is a harmless no-op.)
+            if child_ran or exit_code is None:
+                try:
+                    proc.kill()
+                    proc.communicate()
+                except Exception:
+                    pass  # nothing may escape: budget capture below is mandatory
             raw_out, raw_err = b"", b""
             exit_code, err = None, f"POST-SPAWN-UNCERTAIN ({type(e).__name__}): {e}"
         bump_usage(L, use_key)   # consumed the moment the child was run, pre-decode

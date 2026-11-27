@@ -10,8 +10,12 @@ traps subprocess.Popen (argv-scoped) to inject ONE non-OSError at the spawn
 call; the writes themselves are real. There is no sshd involvement anywhere —
 the revoke tests operate on authorized_keys FILES directly (the docstring
 previously overclaimed "no mocks"; corrected rev-7, ChatGPT re-pin-5 P1). No
-network. Suite: 22 scenarios / 57 checks — 57 PASS / 0 FAIL at the rev-8 pin
-(b134df3; run log `rev8_test_final.log`). Checks:
+network. Suite: 26 scenarios / 63 checks — 63 PASS / 0 FAIL, freshly re-run at
+the review pin from a clean `git archive` of that pin; the run log is COMMITTED
+at scripts/qa/run-artifacts/rev9_test_final.log (ChatGPT re-pin-7 P1: the result
+row cites the artifact committed IN this repo, not a /tmp scratch log; the
+review pin is recorded inside that artifact's header, not hardcoded here so
+this line can never go stale between pins). Checks:
   P0-1 unsigned plan            -> nothing executes; requests stay PENDING
                                   (rev-7: unverifiable is never terminal) and a
                                   later signature runs the SAME id
@@ -897,17 +901,29 @@ def main():
         ufile.parent.mkdir(parents=True, exist_ok=True)
         ufile.write_text("{not json at all")
         enqueue(clone, [{"id": "r19", "argv": argv19}])
-        run_broker(tmp, home)
+        rp19 = run_broker(tmp, home)
         recs = all_records(clone)
         r19 = next((x for x in recs if x.get("id") == "r19"), None)
-        check("P0-19a corrupt budget file -> BUDGET-STATE-CORRUPT refusal, zero exec",
-              r19 is not None and "BUDGET-STATE-CORRUPT" in r19.get("reason", "")
-              and not mk19.exists(), str(r19)[:200])
+        # rev-9 (Claude re-pin-7 BLOCKING): corrupt budget state is now HELD, not
+        # terminally refused. A hold writes NOTHING — no disposition, no state
+        # file — identical to the unverifiable-plan PENDING path (Claude re-pin-5
+        # precedent). The original id stays runnable. (rev-8 wrote a refusal
+        # disposition that blocked the id forever — unverifiable-is-never-terminal
+        # violation.)
+        check("P0-19a corrupt budget file -> BUDGET-STATE-CORRUPT HELD (no "
+              "disposition, no state file, zero exec)",
+              "BUDGET-STATE-CORRUPT r19" in rp19.stdout and r19 is None
+              and not mk19.exists() and not (state / "state" / "r19.json").exists())
         ufile.unlink()   # explicit owner intervention: remove the corrupt state
-        enqueue(clone, [{"id": "r19b2", "argv": argv19}])
+        # rev-9 REQUIRED test (Claude re-pin-7): repair then re-queue the ORIGINAL
+        # id — a hold must let the same request id run exactly once afterwards.
+        enqueue(clone, [{"id": "r19", "argv": argv19}])
         run_broker(tmp, home)
-        check("P0-19b owner removed corrupt file -> budget path executes again",
-              mk19.exists())
+        s19 = json.loads((state / "state" / "r19.json").read_text())
+        check("P0-19b owner removed corrupt file -> SAME request id r19 runs again "
+              "(hold is not terminal)",
+              mk19.exists() and s19.get("status") in ("executed", "published"),
+              str(s19)[:200])
 
         # ================= rev-8 budget-history & corrupt-state block =================
         # P0-20 rev-8 (ChatGPT re-pin-6 Q2 REQUIRED): dedicated coverage for the
@@ -968,32 +984,40 @@ def main():
         (state / "usage").mkdir(parents=True, exist_ok=True)
         (state / "usage" / f"{use20d}.json").write_text("[]")   # valid JSON, not an object
         enqueue(clone, [{"id": "r20d", "argv": argv20d}])
-        run_broker(tmp, home)
+        rp20d = run_broker(tmp, home)
         r20d = next((x for x in all_records(clone) if x.get("id") == "r20d"), None)
-        check("P0-20d usage JSON '[]' (wrong shape) -> BUDGET-STATE-CORRUPT refusal, "
-              "no crash, no exec",
-              r20d is not None and "BUDGET-STATE-CORRUPT" in r20d.get("reason", "")
-              and not mk20d.exists(), str(r20d)[:220])
+        # rev-9: wrong-shape usage file -> HELD (no disposition), not a refusal.
+        check("P0-20d usage JSON '[]' (wrong shape) -> BUDGET-STATE-CORRUPT held, "
+              "no crash, no exec, no disposition",
+              "BUDGET-STATE-CORRUPT r20d" in rp20d.stdout and r20d is None
+              and not mk20d.exists()
+              and not (state / "state" / "r20d.json").exists(), str(rp20d.stdout)[-200:])
 
         # P0-20e corrupt execution-HISTORY record -> fail closed, NOT silently
-        # skipped: an unparseable record refuses a brand-new command even though
-        # the intact history around it would grant a run (rev-8 3B).
+        # skipped: an unparseable record HOLDS a brand-new command even though
+        # the intact history around it would grant a run (rev-8 3B). rev-9
+        # (Claude re-pin-7): hold, not terminal refusal — after the owner removes
+        # the corrupt record, the SAME id runs.
         mk20e = Path(tmp) / "marker20e"
         argv20e = ["touch", str(mk20e)]
         write_plan(clone, [argv20e])              # clear the plan gate first
         sign_plan_authority(tmp, key)
         (state / "records" / "zz-corrupt.json").write_text("{not json at all")
         enqueue(clone, [{"id": "r20e", "argv": argv20e}])
-        run_broker(tmp, home)
+        rp20e = run_broker(tmp, home)
         r20e = next((x for x in all_records(clone) if x.get("id") == "r20e"), None)
-        check("P0-20e corrupt execution-history record -> BUDGET-STATE-CORRUPT fail "
-              "closed (never silently skipped), no exec",
-              r20e is not None and "BUDGET-STATE-CORRUPT" in r20e.get("reason", "")
-              and not mk20e.exists(), str(r20e)[:220])
-        # Owner recovery (same as P0-19b) before the next scenario: while the
-        # corrupt record stands, EVERY dispatch refuses fail-closed — proven
-        # behavior, and 20f must start from a clean history.
+        check("P0-20e corrupt execution-history record -> BUDGET-STATE-CORRUPT held "
+              "fail-closed (never silently skipped), no exec, no disposition",
+              "BUDGET-STATE-CORRUPT r20e" in rp20e.stdout and r20e is None
+              and not mk20e.exists()
+              and not (state / "state" / "r20e.json").exists(),
+              str(rp20e.stdout)[-200:])
+        # rev-9 REQUIRED (Claude re-pin-7): repair the record, re-queue the SAME id.
         (state / "records" / "zz-corrupt.json").unlink()
+        enqueue(clone, [{"id": "r20e", "argv": argv20e}])
+        run_broker(tmp, home)
+        check("P0-20e2 owner removed corrupt record -> SAME request id r20e runs "
+              "again (hold is not terminal)", mk20e.exists())
 
         # P0-20f corrupt REQUEST STATE file is held, not treated as unseen (never
         # re-executed); the broker keeps running other requests.
@@ -1010,6 +1034,122 @@ def main():
               and not (Path(tmp) / "marker20f").exists()
               and (Path(tmp) / "marker20g").exists(),
               f"stdout={rp20f.stdout}")
+
+        # ================= rev9 state-shape & timeout legs =================
+        # P0-20g (ChatGPT re-pin-7 P1): a VALID-JSON NON-OBJECT request-state file
+        # (e.g. [[...]]) used to crash the pass inside pending(); now held at
+        # load() and skipped safely by pending(). Id stays undispositioned, cannot
+        # execute, and the file is never rewritten.
+        marker20h = Path(tmp) / "marker20h"
+        write_plan(clone, [["touch", str(marker20h)]])
+        sign_plan_authority(tmp, key)
+        (state / "state" / "r20h.json").write_text('[["not","an","object"]]')
+        enqueue(clone, [{"id": "r20h", "argv": ["touch", str(marker20h)]}])
+        rp20h = run_broker(tmp, home)
+        check("P0-20g valid-JSON non-object state file -> LEDGER-STATE-CORRUPT held, "
+              "pass survives, marker NOT touched, state file untouched",
+              "LEDGER-STATE-CORRUPT r20h" in rp20h.stdout
+              and not marker20h.exists()
+              and (state / "state" / "r20h.json").read_text() == '[["not","an","object"]]',
+              f"rc={rp20h.returncode} {rp20h.stdout[-220:]}")
+
+        # P0-20h (ChatGPT re-pin-7 P1): an UNREADABLE state file (exists, OSError
+        # on read — chmod 000 as non-root) is the SAME corruption class as
+        # malformed JSON: held, never silently treated as 'never seen'.
+        if os.geteuid() != 0:
+            marker20i = Path(tmp) / "marker20i"
+            (state / "state" / "r20i.json").write_text('{"id":"r20i","status":"executed"}')
+            (state / "state" / "r20i.json").chmod(0o000)
+            enqueue(clone, [{"id": "r20h", "argv": ["touch", str(marker20h)]},
+                            {"id": "r20i", "argv": ["touch", str(marker20i)]}])
+            rp20i = run_broker(tmp, home)
+            (state / "state" / "r20i.json").chmod(0o644)
+            check("P0-20h unreadable state file (OSError) -> LEDGER-STATE-CORRUPT held, "
+                  "never treated as unseen, nothing executed",
+                  "LEDGER-STATE-CORRUPT r20i" in rp20i.stdout and not marker20i.exists(),
+                  f"rc={rp20i.returncode} {rp20i.stdout[-220:]}")
+        else:
+            print("SKIP  P0-20h (running as root: chmod-000 unreadability is not enforceable)")
+
+        # P0-9e (Claude re-pin-7 non-blocking 1): a signed plan whose BYTES are not
+        # valid UTF-8. UnicodeDecodeError is a ValueError; verify_plan must hold
+        # every request PENDING, not let the decode error crash the pass. The
+        # invalid bytes are signed AS-IS, so the signature itself is valid and the
+        # ONLY failure is the decode.
+        auth9e = authority_clone(tmp)
+        pf9e = auth9e / "workflows/m0-plans/open.json"
+        marker9e = Path(tmp) / "marker9e"
+        pf9e.write_bytes(b'{"schema":"m0-exec-plan-v1","wave":"0","commands":['
+                         b'[["touch","' + str(marker9e).encode() + b'"],[],1]]}\xff\xfe')
+        for stale in (pf9e.parent / "open.json.sig", pf9e.parent / "open.sig"):
+            if stale.exists():
+                stale.unlink()
+        sig9e = sh("ssh-keygen", "-Y", "sign", "-f", str(key), "-n", "file", str(pf9e))
+        assert sig9e.returncode == 0, sig9e.stderr
+        stage_and_push(auth9e, "signed plan with trailing invalid UTF-8 (attack sim)")
+        enqueue(clone, [{"id": "r9e", "argv": ["touch", str(marker9e)]}])
+        rp9e = run_broker(tmp, home)
+        check("P0-9e signed plan with invalid UTF-8 -> pass survives, request PENDING, "
+              "no traceback, nothing executed",
+              rp9e.returncode == 0 and "Traceback" not in (rp9e.stdout + rp9e.stderr)
+              and "PENDING r9e" in rp9e.stdout and not marker9e.exists(),
+              f"rc={rp9e.returncode} out={rp9e.stdout[-220:]} err={rp9e.stderr[-120:]}")
+
+        # P0-17e (ChatGPT re-pin-7 P0 BLOCKER): exceptions raised INSIDE the
+        # TimeoutExpired handler used to escape before bump_usage and the durable
+        # record — a fresh id then got a FREE attempt at the same signed command.
+        # rev-9 catches kill()/reap failures at the site: the pass still writes a
+        # durable post-spawn outcome AND consumes the budget. In-process mock so
+        # the patch actually reaches the broker (P0-17c pattern; argv-scoped trap
+        # so the broker's own git calls run untouched).
+        argv17e = ["sleep", "60"]
+        write_plan(clone, [argv17e])
+        sign_plan_authority(tmp, key)
+        enqueue(clone, [{"id": "r17e", "argv": argv17e}])
+
+        class _TimeoutKillFail:
+            def communicate(self, timeout=None):
+                if timeout is not None:
+                    raise subprocess.TimeoutExpired(argv17e, 3600)
+                return b"", b""
+            def kill(self):
+                raise OSError("simulated kill() failure")
+
+        def trap_popen17e(cmd, *a2, **k2):
+            if isinstance(cmd, (list, tuple)) and cmd and cmd[0] == "sleep":
+                return _TimeoutKillFail()
+            return real_popen(cmd, *a2, **k2)   # real_popen bound in P0-17c leg
+        a17e = _types.SimpleNamespace(repo=str(clone), branch="m0-evidence", poll=1,
+                                      state_dir=str(state), owner_principal=PRINCIPAL)
+        L17e = runner_mod.Ledger(str(state))
+        with mock.patch.object(runner_mod.subprocess, "Popen", side_effect=trap_popen17e):
+            runner_mod.run_pass(a17e, Path(tmp) / "allowed_signers", L17e)
+        r17e = next((x for x in all_records(clone) if x.get("id") == "r17e"), None)
+        check("P0-17e timeout whose kill() itself raises -> durable POST-SPAWN record "
+              "with TIMEOUT + cleanup failure, spawn_succeeded true",
+              r17e is not None and "TIMEOUT" in str(r17e.get("error", ""))
+              and "simulated kill() failure" in str(r17e.get("error", ""))
+              and r17e.get("spawn_succeeded") is True,
+              str(r17e)[:260])
+        # Budget must be consumed despite the cleanup failure: the SAME signed
+        # command is BUDGET-EXHAUSTED for a fresh id afterwards.
+        enqueue(clone, [{"id": "r17e2", "argv": argv17e}])
+        rp17e2 = run_broker(tmp, home)
+        # Same fail-closed read the broker itself uses: earlier legs deliberately
+        # planted corrupt usage files ('[]'); the broker skips them (HOLD), so the
+        # assertion must read them the same way, not crash on them.
+        def _u(f):
+            try:
+                b = json.loads(f.read_text())
+                return b.get("count") if isinstance(b, dict) else None
+            except (json.JSONDecodeError, OSError):
+                return None
+        u17e = {f.stem: _u(f) for f in (state / "usage").glob("*.json")}
+        check("P0-17e2 budget consumed despite timeout-cleanup failure; same signed "
+              "command BUDGET-EXHAUSTED for a fresh id",
+              any((v or 0) >= 1 for v in u17e.values())
+              and "BUDGET-EXHAUSTED" in rp17e2.stdout,
+              f"usage={u17e} out={rp17e2.stdout[-220:]}")
 
     print("FAILS:", FAILS or "none")
     sys.exit(1 if FAILS else 0)
