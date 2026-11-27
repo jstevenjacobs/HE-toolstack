@@ -39,8 +39,8 @@ PASS  P0-16a plan absent -> request stays PENDING, no disposition, no exec
 PASS  P0-16b later owner signature authorizes the SAME id (absence != blacklist)
 PASS  P0-17a spawn OSError -> definite record (spawn_succeeded=false, never ran)
 PASS  P0-17b definite spawn failure never becomes UNPROVEN after restart
-[m0-broker 2026-11-27T20:19:00.450092+00:00] SPAWN-FAILED r17c: injected non-OSError at spawn
-[m0-broker 2026-11-27T20:19:00.487988+00:00] published 1 dispositions (durable, confirmed push)
+[m0-broker 2026-11-27T21:19:57.598046+00:00] SPAWN-FAILED r17c: injected non-OSError at spawn
+[m0-broker 2026-11-27T21:19:57.638894+00:00] published 1 dispositions (durable, confirmed push)
 PASS  P0-17c non-OSError at spawn -> definite SPAWN-FAILED, spawn_succeeded=false, never 'started', never executed
 PASS  P0-17d invalid-UTF8 output -> recorded EXECUTED (spawn_succeeded=true), lossy decode, never 'never executed'
 PASS  P0-17d2 executed bad-UTF8 command never re-executes across restart
@@ -61,9 +61,9 @@ PASS  P0-20f corrupt request-state file -> LEDGER-STATE-CORRUPT held, never re-e
 PASS  P0-20g valid-JSON non-object state file -> LEDGER-STATE-CORRUPT held, pass survives, marker NOT touched, state file untouched
 PASS  P0-20h unreadable state file (OSError) -> LEDGER-STATE-CORRUPT held, never treated as unseen, nothing executed
 PASS  P0-9e signed plan with invalid UTF-8 -> pass survives, request PENDING, no traceback, nothing executed
-[m0-broker 2026-11-27T20:19:03.754361+00:00] EXECUTED r17e exit=None
-[m0-broker 2026-11-27T20:19:03.754553+00:00] PENDING-SKIP r20h: state is list, not an object (held via load)
-[m0-broker 2026-11-27T20:19:03.792333+00:00] published 1 dispositions (durable, confirmed push)
+[m0-broker 2026-11-27T21:20:01.030843+00:00] EXECUTED r17e exit=None
+[m0-broker 2026-11-27T21:20:01.031043+00:00] PENDING-SKIP r20h: state is list, not an object (held via load)
+[m0-broker 2026-11-27T21:20:01.068479+00:00] published 1 dispositions (durable, confirmed push)
 PASS  P0-17e timeout whose kill() itself raises -> durable POST-SPAWN record with TIMEOUT + cleanup failure, spawn_succeeded true
 PASS  P0-17e2 budget consumed despite timeout-cleanup failure; same signed command BUDGET-EXHAUSTED for a fresh id
 FAILS: none
