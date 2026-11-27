@@ -4,7 +4,7 @@ Every anchor is extracted mechanically from `git show <PIN>:<file>` —
 nothing here is asserted from memory. FAILS LOUD if any anchor is absent."""
 import subprocess, sys, re
 
-PIN = "b134df3"
+PIN = "a695398"
 REPO = "/opt/data/cache/scratch/HE-toolstack-review"
 
 def at(path):
