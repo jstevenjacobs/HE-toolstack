@@ -11,8 +11,12 @@ call; the writes themselves are real. There is no sshd involvement anywhere —
 the revoke tests operate on authorized_keys FILES directly (the docstring
 previously overclaimed "no mocks"; corrected rev-7, ChatGPT re-pin-5 P1). No
 network. Suite: 20 scenarios / 63 checks — 63 PASS / 0 FAIL / exit 0, run at
-the code pin from a clean `git archive` of it; the run log is COMMITTED
-at scripts/qa/run-artifacts/rev9_test_atpin.log (ChatGPT re-pin-7 P1: the result
+the code pin from a clean `git archive` of it (rev-9 evidence:
+scripts/qa/run-artifacts/rev9_test_atpin.log). Rev-10 adds the across-pass
+accounting-halt + decode-safe ledger scenarios (P0-22a-e, P0-23, P0-24,
+P0-17e2b) and makes SKIP count against a clean run; rev-10 evidence is the
+committed scripts/qa/run-artifacts/rev10_test_atpin.log (re-counted from
+that artifact, never from this sentence) (ChatGPT re-pin-7 P1: the result
 row cites the artifact committed IN this repo, not a /tmp scratch log; the
 review pin is recorded inside that artifact's header, not hardcoded here so
 this line can never go stale between pins; scenario/check counts below are
