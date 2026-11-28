@@ -9,7 +9,7 @@ budget accounting halt) + Claude re-pin-8 blockers (publish integrity under
 undecodable record bytes; kill/reap on generic post-spawn failure)."""
 import subprocess, sys, re, hashlib
 
-PIN = "57fb6fb"
+PIN = "463ebe3"
 REPO = "/opt/data/cache/scratch/HE-toolstack-review"
 
 def at(path, pin=PIN):
@@ -120,10 +120,12 @@ _doc_only = all(
     _a[0] <= int(h0) and int(h0) + int(h1 or 1) <= _a[1] and
     _b[0] <= int(h2) and int(h2) + int(h3 or 1) <= _b[1] for h0, h1, h2, h3 in _hunks) if _hunks else True
 _codeident = _runner_same and _doc_only
-claim("Code executed by the suite at the pinned commit (" + "b10913d" + ", run from clean `git archive`, artifact header cites its full SHA) is the code AT THIS REVIEW PIN: runner byte-identical b10913d→" + PIN + " (git diff --quiet, 0 lines) and the only test-file delta b10913d→" + PIN + " is inside the module docstring — every `git diff -U0` hunk of the test file falls within the docstring line span at BOTH endpoints (verified here programmatically)" + (", the artifact commit adds only the run log + header" if _doc_only else ""),
+claim("Code executed by the suite at the pinned commit (" + "b10913d" + ", run from clean `git archive`, artifact header cites its full SHA) is the code AT THIS REVIEW PIN: runner byte-identical b10913d→" + PIN + " (git diff --quiet, 0 lines) and the only test-file delta b10913d→" + PIN + " is inside the module docstring — every `git diff -U0` hunk of the test file falls within the docstring line span at BOTH endpoints (verified here programmatically)",
       "git diff --quiet b10913d " + PIN + " -- runner => clean; test hunks "
       + str(_hunks) + f" ⊂ docstring spans {_a}/{_b}"
       if _codeident else "CODE-DIVERGED-BETWEEN-PINS")
+if not _codeident:
+    sys.exit("CODE-DIVERGED-BETWEEN-PINS b10913d.." + PIN)
 
 # ---- rev-9 baseline rows: the parts of the runner Grok already ACCEPTED ----
 _claim_base = subprocess.run(["git", "-C", REPO, "log", "--oneline", "-1", "d1c0e09"],
@@ -169,4 +171,5 @@ claim("Revoke script byte-identical since re-pin-7 pin (no new claims about it)"
 print("| # | Claim (rev-10, at pin `" + PIN + "`) | Evidence (mechanically extracted) |")
 print("|---|---|---|")
 for i, (c, ev) in enumerate(rows, 1):
-    print(f"| {i} | {c} | `{ev}` |")
+    # pipe chars inside cells would break the markdown table; escape them
+    print(f"| {i} | {c.replace('|', chr(92)+'|')} | `{ev}` |")
