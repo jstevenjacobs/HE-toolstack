@@ -80,6 +80,29 @@ generator, never asserted from this file (ChatGPT re-pin-7 P1-2). Checks:
                                   non-object and unreadable file), never
                                   re-executed, never silently blacklisted (rev-8,
                                   Claude re-pin-6 non-blocking 1; P0-20 family)
+  P0-22a–e post-spawn ACCOUNTING failure (budget-counter write, completion-record
+                                  write, state save) at the spawn->durability
+                                  boundary is fail-closed THREE ways: the pass
+                                  halts and withholds publication; a DURABLE
+                                  accounting-halt marker blocks ALL dispatch on
+                                  EVERY later pass, daemon retry or restart
+                                  included; and the completion record is written
+                                  anyway on counter failure, so execution
+                                  history exhausts the budget for a fresh id
+                                  even after the marker is removed and the
+                                  counter repaired (ChatGPT re-pin-8 blocking
+                                  P0 + cross-pass gap; Claude re-pin-8 blocking
+                                  2; rev-10)
+  P0-23   undecodable state/usage/history FILES yield the same integrity holds
+                                  as malformed JSON — a child printing non-UTF-8
+                                  into a terminal does NOT crash every later
+                                  pass; a non-UTF-8 signed plan likewise yields
+                                  PENDING (ChatGPT re-pin-8 P0-2 + non-blocking
+                                  2; Claude re-pin-8 non-blocking 2; rev-10)
+  P0-24   a generic post-spawn failure kills AND reaps the child — no live
+                                  orphan survives the uncertainty path
+                                  (ChatGPT re-pin-8 non-blocking 3; Claude
+                                  re-pin-7 non-blocking 3; rev-10)
 Usage: python3 scripts/qa/test_broker_p0.py
 """
 import hashlib
@@ -99,6 +122,7 @@ RUNNER = ROOT / "scripts" / "m0-broker-runner.py"
 REVOKE = ROOT / "scripts" / "m0-broker-revoke-keys.sh"
 PRINCIPAL = "steven@he-toolstack.local"
 FAILS = []
+SKIPS = []
 
 
 def sh(*a, cwd=None):
@@ -234,6 +258,14 @@ def check(name, cond, detail=""):
     print(("PASS  " if cond else "FAIL  ") + name + (f"   {detail[:300]}" if not cond else ""))
     if not cond:
         FAILS.append(name)
+
+
+# rev-10 (ChatGPT re-pin-8 P1): a SKIPPED leg must never masquerade as a clean
+# suite run. Skips are counted and force a non-zero exit — the archive run used
+# as council evidence is only valid when every scenario actually EXECUTED.
+def skip(name, why):
+    print("SKIP  " + name + f"   ({why})")
+    SKIPS.append(name)
 
 
 def main():
@@ -1072,7 +1104,9 @@ def main():
                   "LEDGER-STATE-CORRUPT r20i" in rp20i.stdout and not marker20i.exists(),
                   f"rc={rp20i.returncode} {rp20i.stdout[-220:]}")
         else:
-            print("SKIP  P0-20h (running as root: chmod-000 unreadability is not enforceable)")
+            skip("P0-20h unreadable state file (OSError) hold",
+                 "running as root: chmod-000 unreadability is not enforceable — "
+                 "suite archive run must be executed as non-root")
 
         # P0-9e (Claude re-pin-7 non-blocking 1): a signed plan whose BYTES are not
         # valid UTF-8. UnicodeDecodeError is a ValueError; verify_plan must hold
@@ -1154,8 +1188,274 @@ def main():
               and "BUDGET-EXHAUSTED" in rp17e2.stdout,
               f"usage={u17e} out={rp17e2.stdout[-220:]}")
 
-    print("FAILS:", FAILS or "none")
-    sys.exit(1 if FAILS else 0)
+        # ---- rev-10 (ChatGPT re-pin-8 non-blocking 2) --------------------
+        # P0-17e2 inferred bump_usage() from the budget result alone. This leg
+        # PROVES the call runs during an actual execution: a clean pass runs
+        # under a spy WRAPPING the real bump_usage, and the per-command counter
+        # mechanically increments (before -> after == +1) across that execution.
+        # Direct evidence of the post-spawn accounting call, not inference from
+        # a later budget refusal. (Usage counters live at state/usage/<key>.json
+        # keyed by sha256(json.dumps(argv))[:24] — see bump_usage.)
+        real_bump = runner_mod.bump_usage
+        argv17e2b = ["git", "rev-parse", "HEAD"]      # a planned command
+        write_plan(clone, [argv17e, argv17e2b])       # keep the sleep leg planned
+        sign_plan_authority(tmp, key)
+        use_key17e2b = runner_mod.canonical_sha256([argv17e2b, [], 1])
+        use_file17e2b = state / "usage" / f"{use_key17e2b}.json"
+        before17e2b = int(json.loads(use_file17e2b.read_text())["count"]) \
+            if use_file17e2b.exists() else 0
+        enqueue(clone, [{"id": "r17e2b", "argv": argv17e2b}])
+        # a17e / L17e from the P0-17e leg: same state dir, same authority
+        with mock.patch.object(runner_mod, "bump_usage",
+                               side_effect=real_bump) as bumped17e2b:
+            runner_mod.run_pass(a17e, Path(tmp) / "allowed_signers", L17e)
+        after17e2b = int(json.loads(use_file17e2b.read_text())["count"]) \
+            if use_file17e2b.exists() else 0
+        check("P0-17e2b bump_usage EXECUTES during a real spawn + counter "
+              "increments (mechanical delta, not inferred from a budget refusal)",
+              bumped17e2b.call_count >= 1 and after17e2b == before17e2b + 1,
+              f"calls={bumped17e2b.call_count} {before17e2b}->{after17e2b}")
+
+        # ---- rev-10 (ChatGPT re-pin-8 BLOCKING P0; Claude re-pin-8 blocking 2) ----
+        # The spawn -> durability window is fail-closed at THREE layers, each
+        # injected here (P0-22 family). Injecting the accounting writes is done
+        # in-process by patching Ledger.save / bump_usage side effects, mirroring
+        # the exec()-env trick only where a subprocess is unavoidable; in-process
+        # run_pass with trap Popen is the P0-17e mechanism.
+        #
+        # P0-22a/22b: budget-COUNTER write fails after a real spawn ->
+        #   (a) the completion record STILL lands (surviving second ledger), the
+        #       pass halts (exit 3), publication is withheld;
+        #   (b) a durable accounting-halt marker now blocks ALL dispatch on EVERY
+        #       later pass — daemon retry / restart included;
+        #   (c) owner removes the marker and the counter file is repaired: the
+        #       execution-history record STILL exhausts the budget for a FRESH id
+        #       — a completed run can never purchase a free retry.
+        mk22 = Path(tmp) / "marker22"
+        argv22 = ["touch", str(mk22)]
+        write_plan(clone, [argv22])
+        sign_plan_authority(tmp, key)
+        enqueue(clone, [{"id": "r22", "argv": argv22}])
+        state22 = Path(tmp) / "state22"
+        a22 = _types.SimpleNamespace(repo=str(clone), branch="m0-evidence", poll=1,
+                                     state_dir=str(state22), owner_principal=PRINCIPAL)
+        L22 = runner_mod.Ledger(str(state22))
+        real_save = runner_mod.Ledger.save
+        # Inject the failure at the accounting call itself: run_pass resolves
+        # bump_usage as a module global at call time, so patching the module
+        # attribute makes the REAL post-spawn code path raise at exactly the
+        # counter write (OSError, like ENOSPC on the durable volume).
+        with mock.patch.object(runner_mod, "bump_usage",
+                               side_effect=OSError("ENOSPC simulated: usage "
+                                                   "counter write failed")):
+            exit22 = runner_mod.run_pass(a22, Path(tmp) / "allowed_signers", L22)
+        # (a) halted, publication withheld — BUT child ran and the LOCAL record
+        # landed. Read the local durable ledger directly: publication is exactly
+        # what rev-10 withholds, so the published clone must NOT contain r22 yet.
+        local_rec22 = state22 / "records" / "r22.json"
+        rec22 = json.loads(local_rec22.read_text()) if local_rec22.exists() else None
+        check("P0-22a budget-counter write failure post-spawn -> pass halts (exit 3), "
+              "publication withheld, completion record STILL durable (second ledger)",
+              exit22 == 3 and rec22 is not None
+              and rec22.get("spawn_succeeded") is True and "exit" in rec22
+              and "BUDGET-COUNTER-WRITE-FAILED" in str(rec22.get("error", ""))
+              and mk22.exists()
+              and not (clone / "workflows/m0-evidence/records/r22.json").exists(),
+              f"exit={exit22} rec={str(rec22)[:200]}")
+        # (b) the durable marker blocks a WHOLE LATER PASS (daemon retry): a
+        # fresh request with a valid plan dispatches NOTHING while it stands.
+        mk22b = Path(tmp) / "marker22b"
+        enqueue(clone, [{"id": "r22b", "argv": ["touch", str(mk22b)]}])
+        exit22b = runner_mod.run_pass(a22, Path(tmp) / "allowed_signers", L22)
+        check("P0-22b durable accounting-halt marker blocks ALL dispatch on a LATER "
+              "pass (daemon retry cannot walk past the halt)",
+              exit22b == 3 and not mk22b.exists()
+              and (state22 / runner_mod.ACCOUNTING_HALT_PATH).exists(),
+              f"exit={exit22b} marker22b={mk22b.exists()}")
+        # (c) owner removes the marker (disk repaired); counter file was never
+        # written (the failed write). The record still proves one execution:
+        # a FRESH id with the same argv is BUDGET-EXHAUSTED, not re-executed.
+        (state22 / runner_mod.ACCOUNTING_HALT_PATH).unlink()
+        mk22c = Path(tmp) / "marker22c"
+        argv22c = ["touch", str(mk22c)]   # fresh path, SAME-budget-class: use
+        write_plan(clone, [argv22, argv22c])   # original argv still planned
+        sign_plan_authority(tmp, key)
+        enqueue(clone, [{"id": "r22c", "argv": argv22}])   # SAME argv, fresh id
+        exit22c = runner_mod.run_pass(a22, Path(tmp) / "allowed_signers", L22)
+        rec22c = next((x for x in all_records(clone) if x.get("id") == "r22c"), None)
+        check("P0-22c after owner clears the marker + repairs the counter, the "
+              "surviving record exhausts budget for a FRESH id (no free retry)",
+              rec22c is not None
+              and "BUDGET-EXHAUSTED" in str(rec22c.get("reason", "")
+                                            + rec22c.get("error", "")),
+              str(rec22c)[:220])
+
+        # P0-22d: completion-RECORD write fails after a real spawn -> same halt +
+        # marker + no publication (state save is NOT attempted past the record).
+        mk22d = Path(tmp) / "marker22d"
+        argv22d = ["touch", str(mk22d)]
+        write_plan(clone, [argv22d])
+        sign_plan_authority(tmp, key)
+        enqueue(clone, [{"id": "r22d", "argv": argv22d}])
+        state22d = Path(tmp) / "state22d"
+        a22d = _types.SimpleNamespace(repo=str(clone), branch="m0-evidence", poll=1,
+                                      state_dir=str(state22d), owner_principal=PRINCIPAL)
+        L22d = runner_mod.Ledger(str(state22d))
+        real_durable = runner_mod.durable_write
+        trip22d = {"on": False}
+        def durable22d(path, text):
+            if trip22d["on"] and "/records/" in str(path):
+                raise OSError("EROFS simulated: record write failed")
+            return real_durable(path, text)
+        # trip only for the r22d completion record (started save happens first)
+        with mock.patch.object(runner_mod, "durable_write", side_effect=durable22d):
+            trip22d["on"] = False
+            # one-shot: arm once the child has spawned — arm via save spy on 'executed'
+            with mock.patch.object(runner_mod.Ledger, "save", autospec=True,
+                                   side_effect=lambda ledger, rid, status, note=None,
+                                   req_hash=None: (
+                                       trip22d.__setitem__("on", True),
+                                       real_save(ledger, rid, status, note=note,
+                                                 req_hash=req_hash))[-1]):
+                exit22d = runner_mod.run_pass(a22d, Path(tmp) / "allowed_signers", L22d)
+        check("P0-22d completion-record write failure post-spawn -> same halt, marker "
+              "written, publication withheld (no executed-without-record state)",
+              exit22d == 3 and (state22d / runner_mod.ACCOUNTING_HALT_PATH).exists()
+              and mk22d.exists()
+              and next((x for x in all_records(clone) if x.get("id") == "r22d"),
+                       None) is None,
+              f"exit={exit22d}")
+
+        # P0-22e (started-branch bad-byte RECORD): rev-9's started-branch record
+        # read caught ONLY json.JSONDecodeError — a bad-byte or unreadable record
+        # file CRASHED the pass mid-loop (ChatGPT re-pin-8 P0-2: worse than the
+        # council described). rev-10 folds UnicodeDecodeError/OSError into
+        # rec=None: a None record over a real 'started' state lands on the
+        # conservative UNPROVEN refusal, never a re-execution.
+        mk22e = Path(tmp) / "marker22e"
+        argv22e = ["touch", str(mk22e)]
+        state22e = Path(tmp) / "state22e"
+        (state22e / "state").mkdir(parents=True, exist_ok=True)
+        line22e = json.dumps({"id": "r22e", "argv": argv22e})
+        h22e = hashlib.sha256(line22e.encode()).hexdigest()
+        (state22e / "state" / "r22e.json").write_text(json.dumps(
+            {"id": "r22e", "status": "started", "updated": runner_mod.now(),
+             "note": "pre-rev10 crash", "request_line_sha256": h22e}))
+        (state22e / "records").mkdir(parents=True, exist_ok=True)
+        (state22e / "records" / "r22e.json").write_bytes(b"\xff\xfe{\x80bad")
+        write_plan(clone, [argv22e])
+        sign_plan_authority(tmp, key)
+        enqueue(clone, [{"id": "r22e", "argv": argv22e}])
+        a22e = _types.SimpleNamespace(repo=str(clone), branch="m0-evidence", poll=1,
+                                      state_dir=str(state22e), owner_principal=PRINCIPAL)
+        L22e = runner_mod.Ledger(str(state22e))
+        exit22e = runner_mod.run_pass(a22e, Path(tmp) / "allowed_signers", L22e)
+        unf22e = state22e / "refusals" / "r22e.json"
+        rec_un22e = json.loads(unf22e.read_text()) if unf22e.exists() else {}
+        check("P0-22e bad-byte completion record over a valid 'started' state -> no "
+              "crash; conservative UNPROVEN refusal, child NOT re-executed",
+              exit22e == 0 and "UNPROVEN" in str(rec_un22e.get("reason", ""))
+              and rec_un22e.get("unproven") is True and not mk22e.exists(),
+              f"exit={exit22e} refusal={str(rec_un22e)[:160]}")
+        # OWNER RECOVERY (per §3.3: restore or remove the corrupt history file).
+        # The runner now copies evidence BYTE-EXACT, so the bad-byte record is
+        # legitimately still in the shared ledger + published clone; remove both
+        # so the remaining legs run on a recovered ledger (P0-22e proved the
+        # hold; a crash-looping ledger was never the contract).
+        (state / "records" / "r22e.json").unlink(missing_ok=True)
+        (clone / "records" / "r22e.json").unlink(missing_ok=True)
+        for d22e in ("records", "refusals"):
+            (clone / "workflows/m0-evidence" / d22e / "r22e.json").unlink(missing_ok=True)
+
+        # P0-23 (ChatGPT re-pin-8 P0-2 + non-blocking 2; Claude re-pin-8 nb 2):
+        # UNDECODABLE ledger FILES — valid files, invalid UTF-8 — fold into the
+        # SAME integrity holds as malformed JSON at all three ledger reads, never
+        # a crash loop: (a) state file -> LEDGER-STATE-CORRUPT hold (load);
+        # (b) usage file -> BUDGET-STATE-CORRUPT hold (usage_count); (c) any
+        # record file -> corrupt AUDIT HISTORY hold (record_history_count scans
+        # every file before argv filtering — a corrupt history can never grant).
+        # Nothing executes; the corrupt bytes stay exactly as found for the owner.
+        (state / "state" / "r23a.json").write_bytes(b"\xff\xfe{\x80 not utf8")
+        mk23a, mk23b, mk23c = (Path(tmp) / f"marker23{c}" for c in "abc")
+        argv23a, argv23b, argv23c = (["touch", str(m)] for m in (mk23a, mk23b, mk23c))
+        (state / "usage" / f"{runner_mod.canonical_sha256([argv23b, [], 1])}.json").write_bytes(
+            b"\x00\x81\x82 not utf8")
+        (state / "records" / "corrupt23.json").write_bytes(b"\xc3\x28 not utf8")
+        write_plan(clone, [argv23a, argv23b, argv23c])
+        sign_plan_authority(tmp, key)
+        enqueue(clone, [{"id": "r23a", "argv": argv23a},
+                        {"id": "r23b", "argv": argv23b},
+                        {"id": "r23c", "argv": argv23c}])
+        rp23 = run_broker(tmp, home)
+        check("P0-23 undecodable (non-UTF-8) state/usage/record FILES -> same "
+              "integrity HOLDS as corrupt JSON at every read site, pass completes, "
+              "corrupt bytes untouched, nothing executed",
+              rp23.returncode == 0
+              and "LEDGER-STATE-CORRUPT r23a" in rp23.stdout
+              and "BUDGET-STATE-CORRUPT r23b" in rp23.stdout
+              and "BUDGET-STATE-CORRUPT r23c" in rp23.stdout
+              and not mk23a.exists() and not mk23b.exists() and not mk23c.exists()
+              and not (state / "state" / "r23b.json").exists()
+              and not (state / "state" / "r23c.json").exists()
+              and (state / "state" / "r23a.json").read_bytes() == b"\xff\xfe{\x80 not utf8"
+              and (state / "records" / "corrupt23.json").read_bytes() == b"\xc3\x28 not utf8",
+              f"rc={rp23.returncode} out={rp23.stdout[-300:]}")
+
+        # P0-24 (ChatGPT re-pin-8 non-blocking 3): the GENERIC post-spawn handler
+        # kills AND reaps the child — a simulated communicate() blow-up on a LIVE
+        # sleep child must leave no orphan: the trapped process object records
+        # kill called and the reaped flag set.
+        # Owner-recover the P0-23 corrupt history record FIRST so the shared
+        # ledger is clean for the remaining legs (the runner requires this too).
+        (state / "records" / "corrupt23.json").unlink()
+        mk24 = Path(tmp) / "marker24"   # child NOT expected (killed pre-touch... race-free: sleep)
+        argv24 = ["sleep", "30"]
+        write_plan(clone, [argv24])
+        sign_plan_authority(tmp, key)
+        enqueue(clone, [{"id": "r24", "argv": argv24}])
+        state24 = Path(tmp) / "state24"
+        a24 = _types.SimpleNamespace(repo=str(clone), branch="m0-evidence", poll=1,
+                                     state_dir=str(state24), owner_principal=PRINCIPAL)
+        L24 = runner_mod.Ledger(str(state24))
+        live24 = {}
+        class _ExplodeAfterSpawn:
+            def __init__(self, real):
+                self._real = real
+                live24["proc"] = self
+                self.killed = False
+                self.reaped = False
+                self._boom = True
+            def communicate(self, timeout=None):
+                if self._boom:
+                    self._boom = False   # one-shot: the handler's cleanup call
+                    raise RuntimeError("simulated pipe failure post-spawn")
+                out = self._real.communicate()   # real reap
+                self.reaped = True
+                return out
+            def kill(self):
+                self.killed = True
+                self._real.kill()
+            def __getattr__(self, name):
+                return getattr(self._real, name)
+        def trap_popen24(cmd, *a2, **k2):
+            if isinstance(cmd, (list, tuple)) and cmd and cmd[0] == "sleep":
+                return _ExplodeAfterSpawn(real_popen(cmd, *a2, **k2))
+            return real_popen(cmd, *a2, **k2)
+        with mock.patch.object(runner_mod.subprocess, "Popen", side_effect=trap_popen24):
+            exit24 = runner_mod.run_pass(a24, Path(tmp) / "allowed_signers", L24)
+        proc24 = live24.get("proc")
+        rec24 = next((x for x in all_records(clone) if x.get("id") == "r24"), None)
+        check("P0-24 generic post-spawn failure KILLS and REAPS the child (no live "
+              "orphan) and records POST-SPAWN-UNCERTAIN with budget consumed",
+              proc24 is not None and proc24.killed and proc24.reaped is not False
+              and rec24 is not None and rec24.get("spawn_succeeded") is True
+              and "POST-SPAWN-UNCERTAIN" in str(rec24.get("error", "")),
+              f"killed={getattr(proc24,'killed',None)} rec={str(rec24)[:180]}")
+
+    print("FAILS:", FAILS or "none", "| SKIPS:", SKIPS or "none")
+    # rev-10: skips count against a clean run — council evidence requires every
+    # scenario EXECUTED (ChatGPT re-pin-8 P1: SKIP must not masquerade as PASS).
+    sys.exit(1 if (FAILS or SKIPS) else 0)
 
 
 if __name__ == "__main__":

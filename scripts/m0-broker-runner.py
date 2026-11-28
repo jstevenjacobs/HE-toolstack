@@ -85,6 +85,10 @@ RECORD_DIR = "workflows/m0-evidence/records"
 REFUSAL_DIR = "workflows/m0-evidence/refusals"
 PUSH_FAIL_LIMIT = 5
 STATE_DEFAULT = "/opt/m0-broker/state"
+# rev-10 (ChatGPT re-pin-8 blocking P0, across-pass gap): a durable marker
+# written whenever post-spawn accounting fails. While it exists NO pass may
+# dispatch any execution — the restart/daemon retry cannot walk past the halt.
+ACCOUNTING_HALT_PATH = "accounting-halt.json"
 
 def now() -> str:
     return dt.datetime.now(dt.timezone.utc).isoformat()
@@ -162,7 +166,11 @@ class Ledger:
             return None
         try:
             body = json.loads(p.read_text())
-        except (json.JSONDecodeError, OSError) as e:
+        except (json.JSONDecodeError, OSError, UnicodeDecodeError) as e:
+            # rev-10 (ChatGPT+Claude re-pin-8 blocking): bad BYTES in a state
+            # file raise UnicodeDecodeError from read_text() — not OSError, not
+            # JSONDecodeError. Same corruption class, same sentinel fold, or one
+            # bad byte crashes the whole pass.
             # rev-8 (Claude re-pin-6 non-blocking 1): pending() tolerates corrupt
             # state files; load() must not crash the whole pass on one. NEVER
             # return None here (that means 'never seen' -> would RE-EXECUTE).
@@ -192,7 +200,9 @@ class Ledger:
             for f in d.glob("*.json"):
                 try:
                     st = json.loads(f.read_text())
-                except (json.JSONDecodeError, OSError):
+                except (json.JSONDecodeError, OSError, UnicodeDecodeError):
+                    # rev-10 (re-pin-8 blocking): bad-byte state file is the
+                    # same corruption class here — fold, never crash the pass.
                     # rev-9 (ChatGPT re-pin-7 P1): unreadable = corrupt, skip here;
                     # the AUTHORITATIVE read is load(), which holds such a request.
                     continue
@@ -362,6 +372,24 @@ def usage_count(L: Ledger, use_key: str):
     except (json.JSONDecodeError, ValueError, OSError) as e:
         return f"CORRUPT:{e}"
 
+def write_accounting_halt(L: Ledger, rid: str, why: str) -> None:
+    """rev-10 (ChatGPT re-pin-8 blocking P0): durable, pass-independent halt.
+    Written at every post-spawn accounting-failure site; its mere existence
+    makes every subsequent pass dispatch NOTHING (top of run_pass) until the
+    OWNER repairs the ledger and removes it. Best-effort: if even this marker
+    write fails the in-pass halt + exit 3 still fire, and the log says so."""
+    try:
+        durable_write(Path(L.root) / ACCOUNTING_HALT_PATH,
+                      {"halted_at": now(), "request_id": rid, "reason": why,
+                       "recovery": "owner: repair the failing ledger file, "
+                                   "confirm the child outcome, remove "
+                                   "accounting-halt.json (§3.3 rev-10)"})
+    except OSError as e:
+        log(f"ACCOUNTING-HALT-MARKER-FAILED ({type(e).__name__}: {e}) — in-pass "
+            "halt still active (exit 3); a restart cannot be proven blocked; "
+            "manual owner intervention REQUIRED before this broker runs again")
+
+
 def bump_usage(L: Ledger, use_key: str) -> int:
     p = L.root / "usage" / f"{use_key}.json"
     cur = usage_count(L, use_key)
@@ -390,7 +418,9 @@ def record_history_count(L: Ledger, argv, artifacts, max_runs):
     for f in sorted(d.glob("*.json")):
         try:
             rec = json.loads(f.read_text())
-        except (json.JSONDecodeError, OSError) as e:
+        except (json.JSONDecodeError, OSError, UnicodeDecodeError) as e:
+            # rev-10 (re-pin-8 blocking): bad bytes = CORRUPT, same fold; the
+            # caller refuses (HOLD) — a corrupt audit history can never grant.
             return f"CORRUPT:{f.name}: {e}"
         if not isinstance(rec, dict):
             return f"CORRUPT:{f.name}: record is {type(rec).__name__}, not an object"
@@ -437,6 +467,18 @@ def run_pass(a, allowed_signers: Path, L: Ledger) -> int:
     except RuntimeError as e:
         log(f"PASS FAIL (fetch/reset): {e}")
         return 2
+    # rev-10 (ChatGPT re-pin-8 blocking P0): a durable accounting halt from a
+    # PREVIOUS pass blocks ALL dispatch until the owner repairs the ledger and
+    # removes the marker. Without this, a systemd/daemon restart would walk
+    # past the halt and let a fresh request id run despite the broken
+    # accounting boundary.
+    halt_marker = Path(L.root) / ACCOUNTING_HALT_PATH
+    if halt_marker.exists():
+        log(f"ACCOUNTING-HALT: durable marker present ({halt_marker}); this pass "
+            "dispatches NOTHING — owner must repair the ledger, confirm the "
+            "affected child outcome, and remove the marker to re-authorize "
+            "(§3.3 rev-10). exit 3")
+        return 3
     plan = verify_plan(a.repo, allowed_signers, a.owner_principal)
     q = Path(a.repo) / QUEUE_PATH
     # rev-7 (Claude re-pin-5): read the queue as BYTES and decode per line, so one
@@ -446,6 +488,10 @@ def run_pass(a, allowed_signers: Path, L: Ledger) -> int:
     raw_lines: list[bytes] = []
     if q.exists():
         raw_lines = [ln for ln in q.read_bytes().split(b"\n") if ln.strip()]
+
+    # rev-10 (ChatGPT re-pin-8 P0): set True when post-spawn accounting fails;
+    # see the halt site below (pass stops dispatching, publication withheld).
+    accounting_halt = False
 
     for raw_b in raw_lines:
         try:
@@ -519,7 +565,12 @@ def run_pass(a, allowed_signers: Path, L: Ledger) -> int:
             if rec_path.exists():
                 try:
                     rec = json.loads(rec_path.read_text())
-                except json.JSONDecodeError:
+                except (json.JSONDecodeError, OSError, UnicodeDecodeError):
+                    # rev-10 (re-pin-8 blocking): rev-8/9 caught ONLY malformed
+                    # JSON here — an unreadable (OSError) or bad-byte
+                    # (UnicodeDecodeError) RECORD crashed the pass mid-loop.
+                    # rec=None is the SAFE read: the started state keeps its
+                    # conservative UNPROVEN path (never re-executes).
                     rec = None
             if isinstance(rec, dict) and rec.get("spawn_succeeded") is False:
                 L.save(rid, "executed", req_hash=req_hash,
@@ -667,7 +718,13 @@ def run_pass(a, allowed_signers: Path, L: Ledger) -> int:
         # POST-SPAWN-UNCERTAIN branch. Invariant: a successful Popen construction
         # implies bump_usage + a durable spawn_succeeded=True record follow on
         # every path. If bump_usage itself raises, the 'started' state plus the
-        # final-ly reaped child are caught by the restart UNPROVEN path.
+        # finally-reaped child are caught by the restart UNPROVEN path.
+        # rev-10 (ChatGPT re-pin-8): that sentence was the OVER-CLAIM ChatGPT
+        # caught — 'caught by UNPROVEN' protects only the SAME id; a fresh id
+        # could still run when the accounting writes themselves failed. See the
+        # accounting-halt block below: the boundary is now fail-closed with a
+        # durable marker, and the completion record is the surviving budget
+        # proof when the counter write is what failed.
         child_ran = False
         try:
             try:
@@ -701,12 +758,40 @@ def run_pass(a, allowed_signers: Path, L: Ledger) -> int:
                     pass  # nothing may escape: budget capture below is mandatory
             raw_out, raw_err = b"", b""
             exit_code, err = None, f"POST-SPAWN-UNCERTAIN ({type(e).__name__}): {e}"
-        bump_usage(L, use_key)   # consumed the moment the child was run, pre-decode
+        # rev-10 (ChatGPT re-pin-8 BLOCKING P0): rev-9 declared 'Popen implies
+        # bump_usage + durable record on every path' but never said WHAT
+        # HAPPENS when bump_usage / the record write / the state save raise:
+        # control fell THROUGH with state 'started' and no record — the child
+        # RAN with no durable execution evidence and possibly an unconsumed
+        # budget, and the pass kept dispatching. Fix: the accounting block is
+        # fail-closed as ONE unit. ANY failure => durable halt marker + state
+        # stays 'started' (restart -> UNPROVEN hold for the same id), this pass
+        # STOPS dispatching, publication is withheld, exit 3. A subsequent pass
+        # dispatches NOTHING while the marker exists (top of run_pass), so
+        # neither a daemon retry nor a systemd restart can hand a fresh request
+        # id another attempt. Ordering: the bump is attempted FIRST; if it
+        # fails we STILL write the completion record (below, flagged) before
+        # halting — execution history is the second budget ledger
+        # (record_history_count), so a fresh id is BUDGET-EXHAUSTED by the
+        # record even after the owner removes the marker and repairs the
+        # counter. Residual limit, stated not hidden: if BOTH the counter write
+        # AND the record write fail, only owner recovery (§3.3 rev-10) can
+        # re-authorize; the halt marker + exit 3 stay loud in that state.
+        bump_failed = None
+        try:
+            bump_usage(L, use_key)  # consumed the moment the child was run
+        except Exception as e:
+            bump_failed = f"{type(e).__name__}: {e}"
         # Lossy decode BY DESIGN: invalid bytes can never raise and can never
         # un-count an execution. Evidence keeps U+FFFD where bytes were invalid.
         stdout = raw_out.decode("utf-8", errors="replace")
         stderr = raw_err.decode("utf-8", errors="replace")
-        durable_write(L.record(rid), {
+        if bump_failed is not None:
+            err = (err or "") + (f"; BUDGET-COUNTER-WRITE-FAILED ({bump_failed}) "
+                                 "— execution happened, budget counter NOT "
+                                 "incremented; durable record is the surviving "
+                                 "budget proof")
+        rec_body = {
             "id": rid, "wave": plan["wave"], "plan_digest": plan.get("plan_digest"),
             "signed_by": plan.get("signed_by"),
             "started": started, "ended": now(),
@@ -716,12 +801,57 @@ def run_pass(a, allowed_signers: Path, L: Ledger) -> int:
             "max_runs": entry["max_runs"], "artifact_contract": entry["artifacts"],
             "exit": exit_code, "stdout": stdout, "stderr": stderr,
             "error": err, "spawn_succeeded": True,
-            "artifact_digests": art})
-        L.save(rid, "executed", note="record written; publication pending",
-               req_hash=req_hash)
+            "artifact_digests": art}
+        try:
+            durable_write(L.record(rid), rec_body)
+        except OSError as e:
+            accounting_halt = True
+            write_accounting_halt(L, rid, f"durable completion record write "
+                                f"failed ({type(e).__name__}: {e})")
+            log(f"ACCOUNTING-HALT {rid}: durable completion record write failed "
+                f"({type(e).__name__}: {e}) — child RAN, budget consumed; state "
+                "held 'started' (restart -> UNPROVEN), durable halt marker "
+                "written, pass halted, publication withheld, exit 3; OWNER MUST "
+                "repair the ledger and remove the marker")
+            break
+        try:
+            L.save(rid, "executed", note="record written; publication pending",
+                   req_hash=req_hash)
+        except OSError as e:
+            # record IS on disk; state save failed -> the started branch's
+            # record read recovers it as executed on restart. Still halt: a
+            # ledger that cannot save state is broken beyond trust this pass.
+            accounting_halt = True
+            write_accounting_halt(L, rid, f"state save failed "
+                                f"({type(e).__name__}: {e})")
+            log(f"ACCOUNTING-HALT {rid}: state save failed ({type(e).__name__}: "
+                f"{e}) — record durable, halt marker written, pass halted, "
+                "exit 3")
+            break
+        if bump_failed is not None:
+            # The counter write failed but the RECORD (the surviving budget
+            # proof) and the executed-state save are durable. Halt anyway: a
+            # ledger whose counter is out of sync with its audit history must
+            # not keep granting under the counter until the owner repairs it.
+            accounting_halt = True
+            write_accounting_halt(L, rid, f"budget counter write failed "
+                                f"({bump_failed}); record + state durable")
+            log(f"ACCOUNTING-HALT {rid}: budget counter write failed "
+                f"({bump_failed}) — child RAN; durable record written (history "
+                "preserves the budget for fresh ids), state executed; halt "
+                "marker written, publication withheld, exit 3; OWNER: repair "
+                "the counter or rely on record-history accounting, then remove "
+                "the marker (§3.3 rev-10)")
+            break
         log(f"EXECUTED {rid} exit={exit_code}")
 
     # ---- publish: copy durable evidence into the worktree, commit, push ----
+    if accounting_halt:
+        # rev-10: an accounting failure means the ledger evidence set for THIS
+        # pass is incomplete; publishing partial evidence of a run that just
+        # lost its accounting trail is worse than a visible pending exit.
+        log("PUBLISH-HELD: accounting halt this pass — evidence withheld, exit 3")
+        return 3
     pend = L.pending()
     if not pend:
         return 0
@@ -730,7 +860,11 @@ def run_pass(a, allowed_signers: Path, L: Ledger) -> int:
             if src.exists():
                 dest = Path(a.repo) / reldir / f"{rid}.json"
                 dest.parent.mkdir(parents=True, exist_ok=True)
-                dest.write_text(src.read_text())
+                # rev-10 (P0-22e surfaced): copy BYTE-EXACT. read_text() here was
+                # a UnicodeDecodeError site — an undecodable record crashed the
+                # pass in the publish loop. Evidence must be copied verbatim;
+                # decoding it was never part of the durability contract.
+                dest.write_bytes(src.read_bytes())
     paths = [str(Path(a.repo) / d) for d in (RECORD_DIR, REFUSAL_DIR)
              if (Path(a.repo) / d).exists()]
     if not paths:
