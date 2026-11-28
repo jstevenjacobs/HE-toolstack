@@ -1,0 +1,13 @@
+REVIEW-PIN: b10913d485ca7ac9bffa8fc5e11452de6b96b1e3
+SUITE-EXIT: 0
+PASS-COUNT: 71
+FAIL-COUNT: 0
+SKIP-COUNT: 0
+RUN-ENV: python3 3.13.5, non-root (no chmod-000 skip), Linux WSL
+GATES: run at the same commit in the WORKING tree (repo with .git): TOTAL 27,
+  FAILS 0. The suite itself ran in a clean git-archive extraction of the pin.
+  NOTE (honest limitation): gates_v13 Q12 verifies cited @sha tokens with
+  'git cat-file' against _root; a git-archive tree has no .git, so the same
+  run there reports Q12 bad=[4c887f8,f44c294] as an environment artifact, not
+  a defect. Both shas are real commits in this repo and ancestors of the pin
+  (verifiable: git merge-base --is-ancestor 4c887f8 b10913d).

@@ -1,0 +1,91 @@
+PASS  P0-1a unsigned plan -> no execution; request stays PENDING (never terminal)
+PASS  P0-1b later owner signature runs the SAME id (unsigned plan blacklists nobody)
+PASS  P0-2 tampered plan -> no execution
+PASS  P0-2b tampered plan -> PENDING, zero disposition written
+PASS  P0-2c tamper superseded by re-sign -> the queued id still runs
+PASS  P0-3 in-plan executes; full capture fields
+PASS  P0-4 out-of-plan refused, never executed
+PASS  P0-5 records+refusals pushed to remote
+PASS  P0-5b pushed diff contains record files
+PASS  P0-6 executed request never re-executes across restarts
+PASS  P0-7a failed-push evidence retried WITHOUT re-execution
+PASS  P0-7b delayed evidence eventually published to remote
+PASS  P0-8a 'started' + no record -> UNPROVEN refusal
+PASS  P0-8b uncertain execution NEVER re-executes (counter file untouched)
+PASS  P0-8c conflicting line under an already-disposed 'started' id -> ID-COLLISION (not UNPROVEN), original line-hash cited in the refusal
+PASS  P0-9 malformed/id-less lines -> refusal records (no silent drop)
+PASS  P0-9b undecodable queue byte -> that line refused on record, the NEXT line still executes (pass survives)
+PASS  P0-9c empty-argv plan entry -> plan unverifiable: PENDING, no exec, no crash (rc=0, pass completed)
+PASS  P0-9c2 corrected signature then executes the same id
+PASS  P0-9d valid-JSON list plan -> PENDING, no crash, no exec
+PASS  P0-10 --once = exactly one counted cycle, exit 0
+PASS  P0-11a revoke is SELECTIVE (Hermes keys gone, owner key kept)
+PASS  P0-11b consolidated EXPECTED=/OBSERVED= verification record, inventory complete
+PASS  P0-11b2 declared-but-absent recovery key FAILS verification (exit non-zero)
+PASS  P0-11c refuses to run without declared recovery path
+PASS  P0-11d removed recovery:<fpr> form is REFUSED (never implicit local-console)
+PASS  P0-11e missing M0_INVENTORY fails CLOSED (rev-6 WARN+proceed removed)
+PASS  P0-12a durable_write fsyncs file AND parent dir (>=2 calls)
+PASS  P0-12b durable_write real write is atomic + correct
+PASS  P0-12c first nested write fsyncs file + full new-directory chain
+PASS  P0-13a reused id + different content -> explicit ID-COLLISION refusal
+PASS  P0-13b colliding argv NEVER executes; original disposition stands
+PASS  P0-13c collision BEFORE started-branch (ID-COLLISION, never UNPROVEN)
+PASS  P0-13d original 'started' state survives the collision untouched
+PASS  P0-14a post-sign artifact swap -> ARTIFACT-MISMATCH refusal, nothing ran
+PASS  P0-14b refusal preserves observed vs pinned digests
+PASS  P0-15 budget survives fresh request ids (per-command key: argv+artifacts+max_runs)
+PASS  P0-16a plan absent -> request stays PENDING, no disposition, no exec
+PASS  P0-16b later owner signature authorizes the SAME id (absence != blacklist)
+PASS  P0-17a spawn OSError -> definite record (spawn_succeeded=false, never ran)
+PASS  P0-17b definite spawn failure never becomes UNPROVEN after restart
+[m0-broker 2026-11-28T15:37:34.254250+00:00] SPAWN-FAILED r17c: injected non-OSError at spawn
+[m0-broker 2026-11-28T15:37:34.290467+00:00] published 1 dispositions (durable, confirmed push)
+PASS  P0-17c non-OSError at spawn -> definite SPAWN-FAILED, spawn_succeeded=false, never 'started', never executed
+PASS  P0-17d invalid-UTF8 output -> recorded EXECUTED (spawn_succeeded=true), lossy decode, never 'never executed'
+PASS  P0-17d2 executed bad-UTF8 command never re-executes across restart
+PASS  P0-17d3 post-decode-failure execution consumed the budget (BUDGET-EXHAUSTED under fresh id, second run refused)
+PASS  P0-18a definite completion record + 'started' -> RECOVERED, never UNPROVEN
+PASS  P0-18b recovered definite outcome never RE-EXECUTES the command
+PASS  P0-18c started + spawn_succeeded=false record -> RECOVERED definite, never UNPROVEN
+PASS  P0-18c2 crash-window spawn failure never re-executes
+PASS  P0-19a corrupt budget file -> BUDGET-STATE-CORRUPT HELD (no disposition, no state file, zero exec)
+PASS  P0-19b owner removed corrupt file -> SAME request id r19 runs again (hold is not terminal)
+PASS  P0-20a first execution runs the command
+PASS  P0-20b usage counter wiped -> durable-record history preserves budget (BUDGET-EXHAUSTED under fresh id, no second execution)
+PASS  P0-20c spawn_succeeded=false record consumed no budget (fresh-id same argv reaches spawn again, never BUDGET-EXHAUSTED)
+PASS  P0-20d usage JSON '[]' (wrong shape) -> BUDGET-STATE-CORRUPT held, no crash, no exec, no disposition
+PASS  P0-20e corrupt execution-history record -> BUDGET-STATE-CORRUPT held fail-closed (never silently skipped), no exec, no disposition
+PASS  P0-20e2 owner removed corrupt record -> SAME request id r20e runs again (hold is not terminal)
+PASS  P0-20f corrupt request-state file -> LEDGER-STATE-CORRUPT held, never re-executed, other requests still run
+PASS  P0-20g valid-JSON non-object state file -> LEDGER-STATE-CORRUPT held, pass survives, marker NOT touched, state file untouched
+PASS  P0-20h unreadable state file (OSError) -> LEDGER-STATE-CORRUPT held, never treated as unseen, nothing executed
+PASS  P0-9e signed plan with invalid UTF-8 -> pass survives, request PENDING, no traceback, nothing executed
+[m0-broker 2026-11-28T15:37:35.497531+00:00] EXECUTED r17e exit=None
+[m0-broker 2026-11-28T15:37:35.497734+00:00] PENDING-SKIP r20h: state is list, not an object (held via load)
+[m0-broker 2026-11-28T15:37:35.534994+00:00] published 1 dispositions (durable, confirmed push)
+PASS  P0-17e timeout whose kill() itself raises -> durable POST-SPAWN record with TIMEOUT + cleanup failure, spawn_succeeded true
+PASS  P0-17e2 budget consumed despite timeout-cleanup failure; same signed command BUDGET-EXHAUSTED for a fresh id
+[m0-broker 2026-11-28T15:37:35.881180+00:00] EXECUTED r17e2b exit=0
+[m0-broker 2026-11-28T15:37:35.881584+00:00] PENDING-SKIP r20h: state is list, not an object (held via load)
+[m0-broker 2026-11-28T15:37:35.922709+00:00] published 1 dispositions (durable, confirmed push)
+PASS  P0-17e2b bump_usage EXECUTES during a real spawn + counter increments (mechanical delta, not inferred from a budget refusal)
+[m0-broker 2026-11-28T15:37:36.100157+00:00] ACCOUNTING-HALT r22: budget counter write failed (OSError: ENOSPC simulated: usage counter write failed) — child RAN; durable record written (history preserves the budget for fresh ids), state executed; halt marker written, publication withheld, exit 3; OWNER: repair the counter or rely on record-history accounting, then remove the marker (§3.3 rev-10)
+[m0-broker 2026-11-28T15:37:36.100219+00:00] PUBLISH-HELD: accounting halt this pass — evidence withheld, exit 3
+PASS  P0-22a budget-counter write failure post-spawn -> pass halts (exit 3), publication withheld, completion record STILL durable (second ledger)
+[m0-broker 2026-11-28T15:37:36.151978+00:00] ACCOUNTING-HALT: durable marker present (/opt/data/cache/scratch/tmpl7m4o0nb/state22/accounting-halt.json); this pass dispatches NOTHING — owner must repair the ledger, confirm the affected child outcome, and remove the marker to re-authorize (§3.3 rev-10). exit 3
+PASS  P0-22b durable accounting-halt marker blocks ALL dispatch on a LATER pass (daemon retry cannot walk past the halt)
+[m0-broker 2026-11-28T15:37:36.310539+00:00] REFUSED r22c: BUDGET-EXHAUSTED: this signed command has already been executed 1/1 authorized time(s) (budget keyed per command: argv+artifacts+max_runs, not request id)
+[m0-broker 2026-11-28T15:37:36.350203+00:00] published 2 dispositions (durable, confirmed push)
+PASS  P0-22c after owner clears the marker + repairs the counter, the surviving record exhausts budget for a FRESH id (no free retry)
+[m0-broker 2026-11-28T15:37:36.518611+00:00] ACCOUNTING-HALT r22d: durable completion record write failed (OSError: EROFS simulated: record write failed) — child RAN, budget consumed; state held 'started' (restart -> UNPROVEN), durable halt marker written, pass halted, publication withheld, exit 3; OWNER MUST repair the ledger and remove the marker
+[m0-broker 2026-11-28T15:37:36.518636+00:00] PUBLISH-HELD: accounting halt this pass — evidence withheld, exit 3
+PASS  P0-22d completion-record write failure post-spawn -> same halt, marker written, publication withheld (no executed-without-record state)
+[m0-broker 2026-11-28T15:37:36.683437+00:00] REFUSED r22e: UNPROVEN: execution was started before a broker restart and its outcome is uncertain; re-execution requires a separate explicit owner recovery decision (§3.3 rev-5)
+[m0-broker 2026-11-28T15:37:36.719927+00:00] published 1 dispositions (durable, confirmed push)
+PASS  P0-22e bad-byte completion record over a valid 'started' state -> no crash; conservative UNPROVEN refusal, child NOT re-executed
+PASS  P0-23 undecodable (non-UTF-8) state/usage/record FILES -> same integrity HOLDS as corrupt JSON at every read site, pass completes, corrupt bytes untouched, nothing executed
+[m0-broker 2026-11-28T15:37:37.090086+00:00] EXECUTED r24 exit=None
+[m0-broker 2026-11-28T15:37:37.123686+00:00] published 1 dispositions (durable, confirmed push)
+PASS  P0-24 generic post-spawn failure KILLS and REAPS the child (no live orphan) and records POST-SPAWN-UNCERTAIN with budget consumed
+FAILS: none | SKIPS: none
